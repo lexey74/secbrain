@@ -31,11 +31,18 @@ class SecBrainPipeline:
         )
         self.ears = LocalEars(
             model_size=config.get('whisper_model', 'base'),
-            device=config.get('device', 'cpu')
+            device=config.get('device', 'cpu'),
+            num_threads=config.get('num_threads', 8)
         )
         self.brain = LocalBrain(
             model=config.get('ollama_model', 'llama3.2')
         )
+        
+        # Установка параметров оптимизации
+        if config.get('num_threads'):
+            self.brain.num_threads = config['num_threads']
+        if config.get('num_ctx'):
+            self.brain.num_ctx = config['num_ctx']
         
         # Настройка instagrapi если есть session
         session_file = Path(config.get('session_file', 'session.json'))

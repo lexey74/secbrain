@@ -51,6 +51,8 @@ Output: strictly JSON.
         self.model = model
         self.base_url = base_url
         self.client = None
+        self.num_threads = None
+        self.num_ctx = None
     
     def initialize(self) -> None:
         """Инициализация клиента Ollama"""
@@ -72,6 +74,35 @@ Output: strictly JSON.
             )
         except Exception as e:
             raise ConnectionError(f"Не удалось подключиться к Ollama: {e}")
+    
+    def warm_up(self) -> bool:
+        """
+        Прогрев модели (загрузка в память)
+        
+        Returns:
+            True если успешно, False если ошибка
+        """
+        if self.client is None:
+            self.initialize()
+        
+        try:
+            print(f"🔥 Прогрев модели {self.model}...")
+            response = self.client.chat(
+                model=self.model,
+                messages=[
+                    {'role': 'user', 'content': 'Hello'}
+                ],
+                options={
+                    'num_predict': 10,
+                    'num_thread': self.num_threads if self.num_threads else 8,
+                    'num_ctx': 512  # Минимальный контекст для прогрева
+                }
+            )
+            print(f"✅ Модель готова к работе")
+            return True
+        except Exception as e:
+            print(f"⚠️  Прогрев не удался: {e}")
+            return False
     
     def analyze(
         self,
@@ -105,33 +136,48 @@ Output: strictly JSON.
         print("   ⏳ Отправка запроса к модели...")
         
         try:
+            import signal
             from rich.progress import Progress, SpinnerColumn, TextColumn
             from rich.console import Console
             
             console = Console()
             
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
-            ) as progress:
-                task = progress.add_task("   Анализ через AI...", total=None)
-                
-                response = self.client.chat(
-                    model=self.model,
-                    messages=[
-                        {'role': 'system', 'content': system_prompt},
-                        {'role': 'user', 'content': user_prompt}
-                    ],
-                    format='json',  # Требуем JSON ответ
-                    options={
-                        'temperature': 0.7,
-                        'num_predict': 1000
-                    }
-                )
-                
-                progress.update(task, completed=True)
+            # Функция для timeout
+            def timeout_handler(signum, frame):
+                raise TimeoutError("AI анализ превысил timeout (180 секунд)")
+            
+            # Устанавливаем timeout 180 секунд (3 минуты для медленного VPS)
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(180)
+            
+            try:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=True
+                ) as progress:
+                    task = progress.add_task("   Анализ через AI...", total=None)
+                    
+                    response = self.client.chat(
+                        model=self.model,
+                        messages=[
+                            {'role': 'system', 'content': system_prompt},
+                            {'role': 'user', 'content': user_prompt}
+                        ],
+                        format='json',  # Требуем JSON ответ
+                        options={
+                            'temperature': 0.7,
+                            'num_predict': 500,  # Уменьшено для ускорения
+                            'num_thread': self.num_threads if self.num_threads else 8,
+                            'num_ctx': self.num_ctx if self.num_ctx else 8192
+                        }
+                    )
+                    
+                    progress.update(task, completed=True)
+            finally:
+                # Отменяем alarm
+                signal.alarm(0)
             
             print("   ✅ Анализ завершён")
             
@@ -141,6 +187,9 @@ Output: strictly JSON.
             
             return result
             
+        except TimeoutError as e:
+            print(f"⏱️  Timeout: {e}")
+            return None
         except json.JSONDecodeError as e:
             print(f"❌ Ошибка парсинга JSON: {e}")
             print(f"Ответ LLM: {result_text[:200]}...")

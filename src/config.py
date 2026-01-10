@@ -9,15 +9,20 @@ import json
 DEFAULT_CONFIG = {
     # Paths
     'output_dir': 'SecondBrain_Inbox',
-    'temp_dir': '.temp',
+    'temp_dir': 'temp',
     'cookies_file': 'cookies.txt',
     'session_file': 'session.json',
     'tags_file': 'known_tags.json',
     
     # Models
-    'whisper_model': 'base',  # tiny, base, small, medium, large
+    'whisper_model': 'base',  # tiny, base, small (рекомендуется), medium, large-v3
+    'whisper_compute_type': 'int8',  # int8 (быстро), float16 (точнее), float32 (максимум)
     'ollama_model': 'mistral-nemo',  # или llama3.2
     'device': 'cpu',  # или cuda
+    
+    # Performance
+    'num_threads': 4,  # Количество потоков CPU
+    'num_ctx': 8192,   # Размер контекста для LLM
     
     # Limits
     'max_comments': 50,
@@ -69,3 +74,9 @@ class Config:
     def as_dict(self) -> Dict:
         """Возврат конфига как словаря"""
         return self.data.copy()
+    
+    def __getattr__(self, key: str):
+        """Доступ к конфигу через атрибуты"""
+        if key in ['config_file', 'data']:
+            return object.__getattribute__(self, key)
+        return self.data.get(key)

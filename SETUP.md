@@ -18,6 +18,11 @@ brew install python@3.10
 ```bash
 sudo apt update
 sudo apt install -y python3.10 python3-pip ffmpeg
+
+# Для Playwright (опционально, если нужен безопасный скрапинг)
+sudo apt install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+  libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+  libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
 ```
 
 ### Windows
@@ -76,7 +81,58 @@ curl 'https://www.instagram.com/' \
   --cookie-jar cookies.txt
 ```
 
-## Шаг 4: Настройка Instagrapi Session (опционально)
+## Шаг 4: Установка Playwright (опционально, для безопасного скрапинга комментариев)
+
+**Зачем нужен Playwright?**
+- Безопасный скрапинг комментариев через настоящий браузер
+- Эмуляция человеческого поведения
+- Минимальный риск бана от Instagram
+
+### Установка
+
+```bash
+# Активируйте venv
+source venv/bin/activate
+
+# Установите Playwright
+pip install playwright
+
+# Установите браузер Chromium
+playwright install chromium
+
+# Linux: установите системные зависимости
+playwright install-deps chromium
+```
+
+### Настройка cookies для Playwright
+
+1. **Расширение для Chrome (рекомендуется):**
+   - Установите [EditThisCookie](https://chrome.google.com/webstore/detail/editthiscookie/fngmhnnpilhplaeedifhccceomclgfbg)
+   - Войдите в Instagram
+   - Кликните расширение → Export → **JSON формат**
+   - Сохраните как `instagram_cookies.json` в корне проекта
+
+2. **Ручной вход (первый запуск):**
+   ```bash
+   # Запустите с видимым окном
+   python -c "
+   from modules.safe_comments import SafeCommentsScraper
+   scraper = SafeCommentsScraper(headless=False)
+   # Войдите вручную, cookies сохранятся автоматически
+   "
+   ```
+
+### Проверка
+
+```bash
+python -c "from playwright.sync_api import sync_playwright; print('✅ Playwright работает')"
+```
+
+Подробнее: [PLAYWRIGHT_GUIDE.md](PLAYWRIGHT_GUIDE.md)
+
+---
+
+## Шаг 5: Настройка Gallery-dl cookies (для gallery-dl метода)
 
 Для получения комментариев и метаданных нужна авторизация:
 

@@ -1,27 +1,36 @@
 """
-HybridGrabber - Парсинг Instagram через yt-dlp + instagrapi
+HybridGrabber - Парсинг Instagram через yt-dlp + gallery-dl
 """
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 import re
+import json
+import shutil
 
 
 @dataclass
 class InstagramContent:
     """Структура данных Instagram поста"""
     url: str
-    media_path: Optional[Path] = None
+    media_path: Optional[Path] = None  # Первый файл (для обратной совместимости)
+    media_paths: List[Path] = None  # Все файлы (для каруселей)
     caption: str = ""
     author: str = ""
     date: str = ""
     comments: List[str] = None
     media_type: str = "unknown"  # video, image, carousel
+    transcript: str = ""  # Добавлено для транскрипции
+    transcript_clean: str = ""  # Чистый текст без таймкодов
     
     def __post_init__(self):
         if self.comments is None:
             self.comments = []
+        if self.media_paths is None:
+            self.media_paths = []
+            if self.media_path:
+                self.media_paths = [self.media_path]
 
 
 class HybridGrabber:
@@ -33,15 +42,16 @@ class HybridGrabber:
         
         Args:
             output_dir: Директория для сохранения медиа
-            cookies_file: Путь к cookies.txt для yt-dlp
+            cookies_file: Путь к cookies.txt для gallery-dl и yt-dlp
         """
         self.output_dir = output_dir
         self.cookies_file = cookies_file
-        self.instagrapi_client = None
+        self.last_request_time = 0
+        self.min_delay = 3.0  # Минимальная задержка между запросами (секунды)
     
     def grab(self, url: str) -> InstagramContent:
         """
-        Основной метод: комбинированный парсинг
+        Основной метод: парсинг через gallery-dl
         
         Args:
             url: URL Instagram поста/рилса
@@ -49,34 +59,83 @@ class HybridGrabber:
         Returns:
             InstagramContent с медиа и метаданными
         """
+        # Rate limiting - задержка между запросами
+        import time
+        import random
+        
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        
+        if time_since_last < self.min_delay:
+            delay = self.min_delay - time_since_last + random.uniform(0, 2)
+            print(f"⏱️  Задержка {delay:.1f}с для защиты от бана...")
+            time.sleep(delay)
+        
+        self.last_request_time = time.time()
+        
         content = InstagramContent(url=url)
         
-        # Шаг 1: Попытка загрузки через yt-dlp (для видео)
-        print("📥 Попытка загрузки через yt-dlp...")
-        content.media_path = self._download_with_ytdlp(url)
+        # Используем gallery-dl для получения всего: медиа + метаданные + комментарии
+        print("📥 Загрузка через gallery-dl...")
+        media_files, metadata = self._download_with_gallery_dl(url)
         
-        # Шаг 2: Парсинг метаданных через instagrapi
-        print("📝 Получение метаданных через instagrapi...")
-        try:
-            metadata = self._fetch_with_instagrapi(url)
-            content.caption = metadata.get('caption', '')
-            content.author = metadata.get('author', '')
-            content.date = metadata.get('date', '')
-            content.comments = metadata.get('comments', [])
-            content.media_type = metadata.get('media_type', 'unknown')
+        if media_files:
+            content.media_path = media_files[0]  # Первый файл как основной
+            content.media_paths = media_files  # Все файлы
+            print(f"✅ Загружено файлов: {len(media_files)}")
+        
+        if metadata:
+            content.caption = metadata.get('description', '')
             
-            # Шаг 3: Если yt-dlp не смог скачать (фото/карусель), используем instagrapi
-            if not content.media_path and self.instagrapi_client:
-                print("📸 Загрузка медиа через instagrapi...")
-                content.media_path = self._download_with_instagrapi(url)
-                
-        except Exception as e:
-            print(f"⚠️  Ошибка instagrapi: {e}")
-            print("ℹ️  Продолжаем только с медиа из yt-dlp...")
+            # Извлекаем username из owner объекта
+            owner = metadata.get('owner', {})
+            if isinstance(owner, dict):
+                content.author = owner.get('username', self._extract_username_from_url(url))
+            else:
+                content.author = self._extract_username_from_url(url)
+            
+            # Форматируем дату
+            timestamp = metadata.get('date')
+            if timestamp:
+                from datetime import datetime
+                try:
+                    # Пробуем как timestamp (int)
+                    if isinstance(timestamp, (int, float)):
+                        content.date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                    # Пробуем как строку ISO формата
+                    elif isinstance(timestamp, str):
+                        # Парсим различные форматы даты
+                        for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                            try:
+                                dt = datetime.strptime(timestamp.split('.')[0].split('+')[0], fmt)
+                                content.date = dt.strftime("%Y-%m-%d")
+                                break
+                            except:
+                                continue
+                except Exception as e:
+                    print(f"⚠️  Не удалось распарсить дату: {e}")
+            
+            # Извлекаем комментарии
+            comments_data = metadata.get('comments', [])
+            if comments_data:
+                content.comments = [
+                    f"{c.get('owner', {}).get('username', 'unknown')}: {c.get('text', '')}"
+                    for c in comments_data
+                    if c.get('text')
+                ]
+                print(f"💬 Получено комментариев: {len(content.comments)}")
+            
+            # Определяем тип медиа
+            if metadata.get('typename') == 'GraphVideo':
+                content.media_type = 'video'
+            elif metadata.get('typename') == 'GraphSidecar':
+                content.media_type = 'carousel'
+            else:
+                content.media_type = 'image'
         
         return content
     
-    def _download_with_ytdlp(self, url: str) -> Optional[Path]:
+    def _download_with_ytdlp(self, url: str) -> tuple[Optional[Path], Optional[Dict]]:
         """
         Загрузка медиафайла через yt-dlp
         
@@ -84,7 +143,7 @@ class HybridGrabber:
             url: URL Instagram
             
         Returns:
-            Путь к скачанному файлу или None
+            Кортеж (путь к скачанному файлу или None, метаданные или None)
         """
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -95,6 +154,7 @@ class HybridGrabber:
             "yt-dlp",
             "--no-playlist",
             "-o", output_template,
+            "--write-info-json",  # Сохраняем метаданные
         ]
         
         if self.cookies_file and self.cookies_file.exists():
@@ -111,193 +171,181 @@ class HybridGrabber:
             )
             
             # Ищем созданный файл
+            media_file = None
             for file in self.output_dir.glob("media.*"):
                 if file.suffix in ['.mp4', '.jpg', '.png', '.webp']:
-                    return file
+                    media_file = file
+                    break
             
-            return None
+            # Читаем метаданные из .info.json
+            metadata = None
+            info_json = self.output_dir / "media.info.json"
+            if info_json.exists():
+                try:
+                    import json
+                    with open(info_json, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                    info_json.unlink()  # Удаляем после чтения
+                except Exception as e:
+                    print(f"⚠️  Не удалось прочитать метаданные: {e}")
+            
+            return media_file, metadata
             
         except subprocess.CalledProcessError as e:
             print(f"❌ Ошибка yt-dlp: {e.stderr}")
-            return None
-    
-    def _fetch_with_instagrapi(self, url: str) -> Dict:
-        """
-        Парсинг метаданных через instagrapi
-        
-        Args:
-            url: URL Instagram
-            
-        Returns:
-            Словарь с метаданными
-        """
-        # Если клиент не инициализирован, возвращаем базовые данные
-        if not self.instagrapi_client:
-            return {
-                'caption': '',
-                'author': self._extract_username_from_url(url),
-                'date': '',
-                'comments': [],
-                'media_type': 'unknown'
-            }
-        
-        try:
-            # Извлечение media_pk из URL
-            media_pk = self._extract_media_pk(url)
-            if not media_pk:
-                raise ValueError("Не удалось извлечь media ID из URL")
-            
-            # Получение информации о медиа
-            media = self.instagrapi_client.media_info(media_pk)
-            
-            # Парсинг данных
-            result = {
-                'caption': media.caption_text or '',
-                'author': media.user.username,
-                'date': media.taken_at.strftime("%Y-%m-%d") if media.taken_at else '',
-                'media_type': str(media.media_type).split('.')[-1].lower(),
-                'comments': []
-            }
-            
-            # Получение комментариев (ограничено)
-            try:
-                comments = self.instagrapi_client.media_comments(media_pk, amount=50)
-                result['comments'] = [
-                    f"{c.user.username}: {c.text}" 
-                    for c in comments[:50] 
-                    if c.text
-                ]
-            except Exception as e:
-                print(f"⚠️  Не удалось получить комментарии: {e}")
-            
-            return result
-            
-        except Exception as e:
-            print(f"⚠️  Ошибка instagrapi: {e}")
-            # Возврат минимальных данных
-            return {
-                'caption': '',
-                'author': self._extract_username_from_url(url),
-                'date': '',
-                'comments': [],
-                'media_type': 'unknown'
-            }
-    
-    def _extract_media_pk(self, url: str) -> Optional[int]:
-        """
-        Извлечение media_pk (post ID) из URL
-        
-        Args:
-            url: Instagram URL
-            
-        Returns:
-            media_pk или None
-        """
-        if not self.instagrapi_client:
-            return None
-        
-        try:
-            # instagrapi имеет встроенный метод для этого
-            return self.instagrapi_client.media_pk_from_url(url)
-        except Exception as e:
-            print(f"⚠️  Ошибка извлечения media_pk: {e}")
-            return None
+            return None, None
     
     def _extract_username_from_url(self, url: str) -> str:
         """Извлечение username из URL"""
         match = re.search(r'instagram\.com/([^/]+)/', url)
         return match.group(1) if match else 'unknown'
     
-    def setup_instagrapi(self, session_file: Path) -> None:
+    def _download_with_gallery_dl(self, url: str) -> Tuple[List[Path], Optional[Dict]]:
         """
-        Настройка клиента instagrapi
-        
-        Args:
-            session_file: Путь к session.json
-        """
-        try:
-            from instagrapi import Client
-            
-            self.instagrapi_client = Client()
-            
-            if session_file.exists():
-                self.instagrapi_client.load_settings(session_file)
-                print("✅ Сессия Instagrapi загружена")
-            else:
-                print("⚠️  Файл session.json не найден")
-                
-        except ImportError:
-            print("⚠️  Библиотека instagrapi не установлена")
-        except Exception as e:
-            print(f"⚠️  Ошибка настройки instagrapi: {e}")
-    
-    def _download_with_instagrapi(self, url: str) -> Optional[Path]:
-        """
-        Загрузка медиа через instagrapi (для фото и каруселей)
+        Загрузка медиа и метаданных через gallery-dl с защитой от бана
         
         Args:
             url: URL Instagram
             
         Returns:
-            Путь к скачанному файлу или None
+            Кортеж (список файлов, метаданные)
         """
-        if not self.instagrapi_client:
-            return None
+        import time
+        import random
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
         
-        try:
-            # Извлечение media_pk
-            media_pk = self._extract_media_pk(url)
-            if not media_pk:
-                return None
-            
-            # Получение информации о медиа
-            media = self.instagrapi_client.media_info(media_pk)
-            
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Определяем тип медиа
-            if media.media_type == 1:  # Фото
-                print("  📷 Скачивание фото...")
-                print("     ⏳ Загрузка...")
-                file_path = self.instagrapi_client.photo_download(media_pk, self.output_dir)
-                # Переименовываем в стандартное имя
-                new_path = self.output_dir / f"media{file_path.suffix}"
-                file_path.rename(new_path)
-                print("     ✅ Фото загружено")
-                return new_path
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Очищаем URL от параметров img_index и igsh (они мешают скачивать всю карусель)
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        # Удаляем параметры, которые ограничивают скачивание
+        query_params.pop('img_index', None)
+        query_params.pop('igsh', None)
+        query_params.pop('igshid', None)
+        # Пересобираем URL
+        clean_query = urlencode(query_params, doseq=True)
+        clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, clean_query, parsed.fragment))
+        
+        # Путь к конфигу
+        config_path = Path(__file__).parent.parent.parent / "gallery-dl.conf"
+        
+        cmd = [
+            "gallery-dl",
+            "--write-metadata",
+            "--directory", str(self.output_dir),
+            "--no-skip",  # Скачиваем все элементы карусели
+        ]
+        
+        # Используем конфиг если существует
+        if config_path.exists():
+            cmd.extend(["--config", str(config_path)])
+        
+        if self.cookies_file and self.cookies_file.exists():
+            cmd.extend(["--cookies", str(self.cookies_file)])
+        
+        cmd.append(clean_url)  # Используем очищенный URL
+        
+        # Retry с exponential backoff
+        max_retries = 3
+        base_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                # Отладочный вывод команды
+                print(f"🔧 Команда: {' '.join(cmd)}")
                 
-            elif media.media_type == 2:  # Видео
-                print("  🎥 Скачивание видео...")
-                print("     ⏳ Загрузка (может занять время)...")
-                file_path = self.instagrapi_client.video_download(media_pk, self.output_dir)
-                new_path = self.output_dir / f"media{file_path.suffix}"
-                file_path.rename(new_path)
-                print("     ✅ Видео загружено")
-                return new_path
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=120  # 2 минуты таймаут
+                )
                 
-            elif media.media_type == 8:  # Карусель
-                print("  🎠 Скачивание первого элемента карусели...")
-                print("     ⏳ Загрузка...")
-                # Скачиваем первый элемент карусели
-                if media.resources and len(media.resources) > 0:
-                    first_resource = media.resources[0]
-                    # Проверяем тип первого элемента
-                    if first_resource.media_type == 1:  # Фото
-                        file_path = self.instagrapi_client.photo_download_by_url(
-                            first_resource.thumbnail_url, 
-                            filename=str(self.output_dir / "media")
-                        )
-                    else:  # Видео
-                        file_path = self.instagrapi_client.video_download_by_url(
-                            first_resource.video_url,
-                            filename=str(self.output_dir / "media")
-                        )
-                    print("     ✅ Элемент карусели загружен")
-                    return Path(file_path) if file_path else None
-                return None
-            
-            return None
-            
-        except Exception as e:
-            print(f"  ❌ Ошибка загрузки через instagrapi: {e}")
-            return None
+                # Выводим результат gallery-dl
+                if result.stdout:
+                    print(f"📤 gallery-dl stdout: {result.stdout[:200]}")
+                if result.stderr:
+                    print(f"⚠️  gallery-dl stderr: {result.stderr[:200]}")
+                
+                # Собираем все скачанные медиа файлы
+                media_files = []
+                # gallery-dl создает структуру: gallery-dl/instagram/username/postid_*.ext
+                for file in sorted(self.output_dir.rglob("*")):
+                    if file.is_file() and file.suffix in ['.mp4', '.jpg', '.png', '.webp', '.jpeg']:
+                        media_files.append(file)
+                
+                # Переименовываем первый файл в media.ext и копируем в корень output_dir
+                if media_files:
+                    # Создаем простые имена media_1, media_2, etc
+                    renamed_files = []
+                    for idx, file in enumerate(media_files, 1):
+                        if idx == 1:
+                            new_name = self.output_dir / f"media{file.suffix}"
+                        else:
+                            new_name = self.output_dir / f"media_{idx}{file.suffix}"
+                        
+                        shutil.copy(file, new_name)
+                        renamed_files.append(new_name)
+                    
+                    media_files = renamed_files
+                
+                # Читаем метаданные из JSON (gallery-dl создает файлы типа media.jpg.json)
+                metadata = None
+                json_files = []
+                for media_file in media_files:
+                    json_path = Path(str(media_file) + '.json')
+                    if json_path.exists():
+                        json_files.append(json_path)
+                
+                # Также ищем любые JSON в output_dir
+                if not json_files:
+                    json_files = list(self.output_dir.rglob("*.json"))
+                
+                if json_files:
+                    try:
+                        with open(json_files[0], 'r', encoding='utf-8') as f:
+                            metadata = json.load(f)
+                        # Удаляем JSON файлы после чтения
+                        for jf in json_files:
+                            jf.unlink()
+                    except Exception as e:
+                        print(f"⚠️  Не удалось прочитать метаданные: {e}")
+                
+                return media_files, metadata
+                
+            except subprocess.TimeoutExpired:
+                print(f"⏱️  Таймаут на попытке {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 5)
+                    print(f"⏳ Повтор через {delay:.1f}с...")
+                    time.sleep(delay)
+                    
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr.lower()
+                
+                # Проверка на rate limit (429) или ban
+                if '429' in error_msg or 'rate limit' in error_msg or 'too many requests' in error_msg:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (3 ** attempt) + random.uniform(10, 30)
+                        print(f"⚠️  Rate limit! Ожидание {delay:.1f}с...")
+                        time.sleep(delay)
+                    else:
+                        print(f"❌ Превышен лимит запросов Instagram. Попробуйте позже.")
+                        return [], None
+                        
+                # Проверка на необходимость авторизации
+                elif 'login' in error_msg or 'authentication' in error_msg:
+                    print(f"❌ Требуется авторизация. Обновите cookies (instagram_cookies.txt)")
+                    return [], None
+                    
+                else:
+                    print(f"❌ Ошибка gallery-dl (попытка {attempt + 1}/{max_retries}): {e.stderr}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        print(f"⏳ Повтор через {delay}с...")
+                        time.sleep(delay)
+        
+        print("❌ Не удалось загрузить после всех попыток")
+        return [], None

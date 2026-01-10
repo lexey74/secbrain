@@ -11,14 +11,20 @@ class TagManager:
     
     DEFAULT_TAGS = ["ai", "productivity", "coding", "health", "marketing"]
     
-    def __init__(self, tags_file: Path = None):
+    def __init__(self, config=None):
         """
         Инициализация менеджера тегов
         
         Args:
-            tags_file: Путь к файлу known_tags.json
+            config: Config объект или путь к файлу known_tags.json
         """
-        if tags_file is None:
+        if config is None:
+            tags_file = Path(__file__).parent.parent.parent / "known_tags.json"
+        elif hasattr(config, 'tags_file'):
+            tags_file = Path(config.tags_file)
+        elif isinstance(config, (str, Path)):
+            tags_file = Path(config)
+        else:
             tags_file = Path(__file__).parent.parent.parent / "known_tags.json"
         
         self.tags_file = tags_file

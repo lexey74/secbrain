@@ -18,16 +18,33 @@ class TranscriptResult:
 class LocalEars:
     """Локальная транскрибация аудио/видео"""
     
-    def __init__(self, model_size: str = "base", device: str = "cpu"):
+    def __init__(
+        self, 
+        model_size: str = "base", 
+        device: str = "cpu", 
+        num_threads: int = 8,
+        compute_type: str = "int8"
+    ):
         """
         Инициализация Whisper модели
         
         Args:
-            model_size: Размер модели (tiny, base, small, medium, large)
+            model_size: Размер модели (tiny, base, small, medium, large-v2, large-v3)
+                       Рекомендации для русского:
+                       - small: хороший баланс скорость/точность (244M параметров)
+                       - medium: высокая точность (769M параметров)
+                       - large-v3: максимальная точность (1550M параметров)
             device: Устройство (cpu, cuda)
+            num_threads: Количество потоков для CPU
+            compute_type: Тип вычислений (int8, float16, float32)
+                         int8 - быстро, средняя точность
+                         float16 - медленнее, лучше точность
+                         float32 - самое медленное, максимальная точность
         """
         self.model_size = model_size
         self.device = device
+        self.num_threads = num_threads
+        self.compute_type = compute_type
         self.model = None
     
     def load_model(self) -> None:
@@ -36,12 +53,13 @@ class LocalEars:
             try:
                 from faster_whisper import WhisperModel
                 
-                print(f"🔄 Загрузка Whisper модели ({self.model_size})...")
+                print(f"🔄 Загрузка Whisper модели ({self.model_size}, {self.compute_type})...")
                 print(f"   ⏳ Это может занять некоторое время при первом запуске...")
                 self.model = WhisperModel(
                     self.model_size,
                     device=self.device,
-                    compute_type="int8"
+                    compute_type=self.compute_type,
+                    cpu_threads=self.num_threads
                 )
                 print("   ✅ Модель Whisper готова")
                 
@@ -74,12 +92,24 @@ class LocalEars:
         print("🎤 Транскрибация аудиодорожки...")
         print("   ⏳ Обработка...")
         
-        # Запуск транскрибации
+        # Запуск транскрибации с улучшенными параметрами
         segments, info = self.model.transcribe(
             str(media_path),
-            language="ru",  # Можно сделать auto-detect
-            beam_size=5,
-            vad_filter=True  # Фильтрация тишины
+            language="ru",  # Можно изменить на None для auto-detect
+            beam_size=10,   # Увеличено с 5 до 10 для лучшей точности
+            best_of=5,      # Выбор лучшего из 5 вариантов
+            temperature=0.0,  # Детерминированный вывод
+            vad_filter=True,  # Фильтрация тишины
+            vad_parameters=dict(
+                threshold=0.5,
+                min_speech_duration_ms=250,
+                max_speech_duration_s=float('inf'),
+                min_silence_duration_ms=2000,
+                speech_pad_ms=400
+            ),
+            # Начальный промпт для контекста (помогает с русским языком)
+            initial_prompt="Транскрипция видео на русском языке из Instagram. "
+                          "Включает разговорную речь, сленг, упоминания технологий и социальных сетей."
         )
         
         # Формирование результатов
