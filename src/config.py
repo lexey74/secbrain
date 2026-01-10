@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
     
     # Models
     'whisper_model': 'base',  # tiny, base, small, medium, large
-    'ollama_model': 'llama3.2',  # или mistral
+    'ollama_model': 'mistral-nemo',  # или llama3.2
     'device': 'cpu',  # или cuda
     
     # Limits

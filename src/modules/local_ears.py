@@ -36,13 +36,14 @@ class LocalEars:
             try:
                 from faster_whisper import WhisperModel
                 
-                print(f"🔄 Загрузка Whisper модели: {self.model_size}...")
+                print(f"🔄 Загрузка Whisper модели ({self.model_size})...")
+                print(f"   ⏳ Это может занять некоторое время при первом запуске...")
                 self.model = WhisperModel(
                     self.model_size,
                     device=self.device,
                     compute_type="int8"
                 )
-                print("✅ Модель загружена")
+                print("   ✅ Модель Whisper готова")
                 
             except ImportError:
                 raise ImportError(
@@ -71,6 +72,7 @@ class LocalEars:
         self.load_model()
         
         print("🎤 Транскрибация аудиодорожки...")
+        print("   ⏳ Обработка...")
         
         # Запуск транскрибации
         segments, info = self.model.transcribe(
@@ -83,6 +85,7 @@ class LocalEars:
         # Формирование результатов
         timed_lines = []
         full_lines = []
+        segment_count = 0
         
         for segment in segments:
             timestamp = self._format_timestamp(segment.start)
@@ -90,6 +93,12 @@ class LocalEars:
             
             timed_lines.append(f"[{timestamp}] {text}")
             full_lines.append(text)
+            
+            segment_count += 1
+            if segment_count % 10 == 0:
+                print(f"   📝 Обработано сегментов: {segment_count}")
+        
+        print(f"   ✅ Транскрибация завершена ({segment_count} сегментов)")
         
         return TranscriptResult(
             timed_transcript="\n".join(timed_lines),

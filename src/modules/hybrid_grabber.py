@@ -51,8 +51,8 @@ class HybridGrabber:
         """
         content = InstagramContent(url=url)
         
-        # Шаг 1: Загрузка медиа через yt-dlp
-        print("📥 Загрузка медиа через yt-dlp...")
+        # Шаг 1: Попытка загрузки через yt-dlp (для видео)
+        print("📥 Попытка загрузки через yt-dlp...")
         content.media_path = self._download_with_ytdlp(url)
         
         # Шаг 2: Парсинг метаданных через instagrapi
@@ -64,9 +64,15 @@ class HybridGrabber:
             content.date = metadata.get('date', '')
             content.comments = metadata.get('comments', [])
             content.media_type = metadata.get('media_type', 'unknown')
+            
+            # Шаг 3: Если yt-dlp не смог скачать (фото/карусель), используем instagrapi
+            if not content.media_path and self.instagrapi_client:
+                print("📸 Загрузка медиа через instagrapi...")
+                content.media_path = self._download_with_instagrapi(url)
+                
         except Exception as e:
             print(f"⚠️  Ошибка instagrapi: {e}")
-            print("ℹ️  Продолжаем только с медиа...")
+            print("ℹ️  Продолжаем только с медиа из yt-dlp...")
         
         return content
     
@@ -125,21 +131,77 @@ class HybridGrabber:
         Returns:
             Словарь с метаданными
         """
-        # TODO: Реализация через instagrapi
-        # Требуется:
-        # 1. Инициализация клиента с session.json
-        # 2. Извлечение media_pk из URL
-        # 3. Получение caption, author, date
-        # 4. Загрузка комментариев (до 50)
+        # Если клиент не инициализирован, возвращаем базовые данные
+        if not self.instagrapi_client:
+            return {
+                'caption': '',
+                'author': self._extract_username_from_url(url),
+                'date': '',
+                'comments': [],
+                'media_type': 'unknown'
+            }
         
-        # Заглушка:
-        return {
-            'caption': '',
-            'author': self._extract_username_from_url(url),
-            'date': '',
-            'comments': [],
-            'media_type': 'unknown'
-        }
+        try:
+            # Извлечение media_pk из URL
+            media_pk = self._extract_media_pk(url)
+            if not media_pk:
+                raise ValueError("Не удалось извлечь media ID из URL")
+            
+            # Получение информации о медиа
+            media = self.instagrapi_client.media_info(media_pk)
+            
+            # Парсинг данных
+            result = {
+                'caption': media.caption_text or '',
+                'author': media.user.username,
+                'date': media.taken_at.strftime("%Y-%m-%d") if media.taken_at else '',
+                'media_type': str(media.media_type).split('.')[-1].lower(),
+                'comments': []
+            }
+            
+            # Получение комментариев (ограничено)
+            try:
+                comments = self.instagrapi_client.media_comments(media_pk, amount=50)
+                result['comments'] = [
+                    f"{c.user.username}: {c.text}" 
+                    for c in comments[:50] 
+                    if c.text
+                ]
+            except Exception as e:
+                print(f"⚠️  Не удалось получить комментарии: {e}")
+            
+            return result
+            
+        except Exception as e:
+            print(f"⚠️  Ошибка instagrapi: {e}")
+            # Возврат минимальных данных
+            return {
+                'caption': '',
+                'author': self._extract_username_from_url(url),
+                'date': '',
+                'comments': [],
+                'media_type': 'unknown'
+            }
+    
+    def _extract_media_pk(self, url: str) -> Optional[int]:
+        """
+        Извлечение media_pk (post ID) из URL
+        
+        Args:
+            url: Instagram URL
+            
+        Returns:
+            media_pk или None
+        """
+        if not self.instagrapi_client:
+            return None
+        
+        try:
+            # instagrapi имеет встроенный метод для этого
+            return self.instagrapi_client.media_pk_from_url(url)
+        except Exception as e:
+            print(f"⚠️  Ошибка извлечения media_pk: {e}")
+            return None
     
     def _extract_username_from_url(self, url: str) -> str:
         """Извлечение username из URL"""
@@ -168,3 +230,74 @@ class HybridGrabber:
             print("⚠️  Библиотека instagrapi не установлена")
         except Exception as e:
             print(f"⚠️  Ошибка настройки instagrapi: {e}")
+    
+    def _download_with_instagrapi(self, url: str) -> Optional[Path]:
+        """
+        Загрузка медиа через instagrapi (для фото и каруселей)
+        
+        Args:
+            url: URL Instagram
+            
+        Returns:
+            Путь к скачанному файлу или None
+        """
+        if not self.instagrapi_client:
+            return None
+        
+        try:
+            # Извлечение media_pk
+            media_pk = self._extract_media_pk(url)
+            if not media_pk:
+                return None
+            
+            # Получение информации о медиа
+            media = self.instagrapi_client.media_info(media_pk)
+            
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Определяем тип медиа
+            if media.media_type == 1:  # Фото
+                print("  📷 Скачивание фото...")
+                print("     ⏳ Загрузка...")
+                file_path = self.instagrapi_client.photo_download(media_pk, self.output_dir)
+                # Переименовываем в стандартное имя
+                new_path = self.output_dir / f"media{file_path.suffix}"
+                file_path.rename(new_path)
+                print("     ✅ Фото загружено")
+                return new_path
+                
+            elif media.media_type == 2:  # Видео
+                print("  🎥 Скачивание видео...")
+                print("     ⏳ Загрузка (может занять время)...")
+                file_path = self.instagrapi_client.video_download(media_pk, self.output_dir)
+                new_path = self.output_dir / f"media{file_path.suffix}"
+                file_path.rename(new_path)
+                print("     ✅ Видео загружено")
+                return new_path
+                
+            elif media.media_type == 8:  # Карусель
+                print("  🎠 Скачивание первого элемента карусели...")
+                print("     ⏳ Загрузка...")
+                # Скачиваем первый элемент карусели
+                if media.resources and len(media.resources) > 0:
+                    first_resource = media.resources[0]
+                    # Проверяем тип первого элемента
+                    if first_resource.media_type == 1:  # Фото
+                        file_path = self.instagrapi_client.photo_download_by_url(
+                            first_resource.thumbnail_url, 
+                            filename=str(self.output_dir / "media")
+                        )
+                    else:  # Видео
+                        file_path = self.instagrapi_client.video_download_by_url(
+                            first_resource.video_url,
+                            filename=str(self.output_dir / "media")
+                        )
+                    print("     ✅ Элемент карусели загружен")
+                    return Path(file_path) if file_path else None
+                return None
+            
+            return None
+            
+        except Exception as e:
+            print(f"  ❌ Ошибка загрузки через instagrapi: {e}")
+            return None

@@ -73,7 +73,13 @@ source venv/bin/activate  # macOS/Linux
 # 3. Установите зависимости
 pip install -r requirements.txt
 
-# 4. Запустите
+# 4. (Опционально) Скопируйте пример конфига
+cp config.example.json config.json
+
+# 5. Проверьте готовность окружения
+python check_setup.py
+
+# 6. Запустите
 python src/main.py
 ```
 

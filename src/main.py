@@ -44,15 +44,29 @@ def check_prerequisites():
     # Проверка yt-dlp
     import subprocess
     try:
-        subprocess.run(['yt-dlp', '--version'], capture_output=True, check=True)
+        result = subprocess.run(
+            ['yt-dlp', '--version'], 
+            capture_output=True, 
+            check=True,
+            timeout=5
+        )
         console.print("✅ yt-dlp found", style="green")
+    except subprocess.TimeoutExpired:
+        issues.append("❌ yt-dlp не отвечает (timeout)")
     except (subprocess.CalledProcessError, FileNotFoundError):
         issues.append("❌ yt-dlp не установлен: pip install yt-dlp")
     
     # Проверка FFmpeg
     try:
-        subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+        result = subprocess.run(
+            ['ffmpeg', '-version'], 
+            capture_output=True, 
+            check=True,
+            timeout=5
+        )
         console.print("✅ FFmpeg found", style="green")
+    except subprocess.TimeoutExpired:
+        issues.append("❌ FFmpeg не отвечает (timeout)")
     except (subprocess.CalledProcessError, FileNotFoundError):
         issues.append("❌ FFmpeg не установлен")
     

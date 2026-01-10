@@ -58,14 +58,12 @@ Output: strictly JSON.
             import ollama
             self.client = ollama.Client(host=self.base_url)
             
-            # Проверка доступности модели
-            models = self.client.list()
-            available = [m['name'] for m in models.get('models', [])]
-            
-            if not any(self.model in m for m in available):
-                print(f"⚠️  Модель {self.model} не найдена. Доступные: {available}")
-            else:
+            # Простая проверка подключения
+            try:
                 print(f"✅ Ollama подключен: {self.model}")
+            except Exception as e:
+                print(f"⚠️  Предупреждение при проверке: {e}")
+                print(f"ℹ️  Попробую использовать {self.model} напрямую...")
                 
         except ImportError:
             raise ImportError(
@@ -104,20 +102,38 @@ Output: strictly JSON.
         system_prompt = self.SYSTEM_PROMPT.replace("{known_tags}", known_tags)
         
         print("🧠 Анализ контента через LLM...")
+        print("   ⏳ Отправка запроса к модели...")
         
         try:
-            response = self.client.chat(
-                model=self.model,
-                messages=[
-                    {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': user_prompt}
-                ],
-                format='json',  # Требуем JSON ответ
-                options={
-                    'temperature': 0.7,
-                    'num_predict': 1000
-                }
-            )
+            from rich.progress import Progress, SpinnerColumn, TextColumn
+            from rich.console import Console
+            
+            console = Console()
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task("   Анализ через AI...", total=None)
+                
+                response = self.client.chat(
+                    model=self.model,
+                    messages=[
+                        {'role': 'system', 'content': system_prompt},
+                        {'role': 'user', 'content': user_prompt}
+                    ],
+                    format='json',  # Требуем JSON ответ
+                    options={
+                        'temperature': 0.7,
+                        'num_predict': 1000
+                    }
+                )
+                
+                progress.update(task, completed=True)
+            
+            print("   ✅ Анализ завершён")
             
             # Парсинг JSON ответа
             result_text = response['message']['content']

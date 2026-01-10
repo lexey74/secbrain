@@ -49,3 +49,13 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# SecBrain specific - sensitive data
+cookies.txt
+session.json
+config.json
+known_tags.json
+
+# SecBrain output directories
+SecondBrain_Inbox/
+.temp/

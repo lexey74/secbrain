@@ -89,12 +89,18 @@ class SecBrainPipeline:
             print(f"✅ Добавлено новых тегов: {added_count}")
         
         # Шаг 5: Создание Asset Bundle
-        note_path = self._create_note_bundle(
-            content=content,
-            ai_result=ai_result,
-            transcript_text=transcript_text,
-            full_text=full_text
-        )
+        print("\n📝 Создание заметки...")
+        try:
+            note_path = self._create_note_bundle(
+                content=content,
+                ai_result=ai_result,
+                transcript_text=transcript_text,
+                full_text=full_text
+            )
+            print("   ✅ Заметка создана")
+        except Exception as e:
+            print(f"❌ Ошибка создания заметки: {e}")
+            return None
         
         print(f"\n{'='*60}")
         print(f"✅ Готово! Заметка: {note_path}")
@@ -131,7 +137,8 @@ class SecBrainPipeline:
         bundle_path.mkdir(parents=True, exist_ok=True)
         
         # Перемещение медиа в bundle
-        if content.media_path:
+        media_ext = ".jpg"  # default
+        if content.media_path and content.media_path.exists():
             media_ext = content.media_path.suffix
             media_dest = bundle_path / f"media{media_ext}"
             content.media_path.rename(media_dest)
@@ -211,6 +218,13 @@ tags:
     
     def _generate_slug(self, text: str) -> str:
         """Генерация короткого slug из текста"""
+        # Если это список, берём первый элемент
+        if isinstance(text, list):
+            text = text[0] if text else "note"
+        # Если не строка, конвертируем
+        if not isinstance(text, str):
+            text = str(text)
+        
         words = text.split()[:4]
         slug = "_".join(words)
         return self._sanitize_filename(slug)

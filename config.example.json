@@ -1,0 +1,12 @@
+{
+  "output_dir": "SecondBrain_Inbox",
+  "temp_dir": ".temp",
+  "cookies_file": "cookies.txt",
+  "session_file": "session.json",
+  "tags_file": "known_tags.json",
+  "whisper_model": "base",
+  "ollama_model": "mistral-nemo",
+  "device": "cpu",
+  "max_comments": 50,
+  "max_tags": 15
+}
