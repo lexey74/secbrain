@@ -22,8 +22,8 @@ class LocalEars:
         self, 
         model_size: str = "small",  # Изменено с "base" на "small" для лучшей точности
         device: str = "cpu", 
-        num_threads: int = 8,
-        compute_type: str = "int8"
+        num_threads: int = 16,  # Оптимизировано: используем гиперпоточность для максимальной скорости
+        compute_type: str = "int8"  # int8 для CPU (float16 не поддерживается эффективно)
     ):
         """
         Инициализация Whisper модели
@@ -35,10 +35,10 @@ class LocalEars:
                        - medium: высокая точность (769M параметров)
                        - large-v3: максимальная точность (1550M параметров)
             device: Устройство (cpu, cuda)
-            num_threads: Количество потоков для CPU
+            num_threads: Количество потоков для CPU (16 для максимальной производительности на 8-ядерном CPU)
             compute_type: Тип вычислений (int8, float16, float32)
-                         int8 - быстро, средняя точность
-                         float16 - медленнее, лучше точность
+                         int8 - оптимально для CPU: быстро + хорошая точность
+                         float16 - только для GPU
                          float32 - самое медленное, максимальная точность
         """
         self.model_size = model_size

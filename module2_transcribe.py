@@ -97,46 +97,76 @@ class TranscriptionProcessor:
         Returns:
             Путь к созданному transcript.md или None при ошибке
         """
-        print(f"\n🎤 Транскрибация: {media_file.name}")
-        print(f"   Размер: {media_file.stat().st_size / 1024 / 1024:.1f} MB")
+        file_size_mb = media_file.stat().st_size / 1024 / 1024
+        
+        print(f"\n{'='*70}")
+        print(f"🎤 НАЧАТА ТРАНСКРИБАЦИЯ")
+        print(f"{'='*70}")
+        print(f"📄 Файл: {media_file.name}")
+        print(f"📦 Размер: {file_size_mb:.1f} MB")
+        print(f"📁 Папка: {output_folder.name}")
+        print(f"{'='*70}")
         
         try:
             # Запускаем транскрибацию
-            print("   🔄 Запуск Whisper...")
-            transcript = self.ears.transcribe(str(media_file))
+            print(f"⏳ Запуск Whisper (модель: {self.ears.model_size})...")
+            print(f"   Это может занять несколько минут...")
+            
+            import time
+            start_time = time.time()
+            
+            transcript = self.ears.transcribe(media_file)
+            
+            elapsed_time = time.time() - start_time
+            elapsed_time = time.time() - start_time
             
             if not transcript:
-                print("   ❌ Whisper не вернул результат")
+                print(f"\n❌ ОШИБКА: Whisper не вернул результат")
+                print(f"{'='*70}\n")
                 return None
+            
+            print(f"\n✅ Транскрибация завершена за {elapsed_time:.1f} секунд")
+            print(f"   Язык: {transcript.language}")
+            print(f"   Длительность: {transcript.duration:.1f} сек")
             
             # Создаем transcript.md
             transcript_file = output_folder / "transcript.md"
             
-            # Формируем Markdown с таймингами
+            print(f"\n📝 Сохранение в Markdown...")
+            
+            # Формируем Markdown
             markdown = f"# Транскрипция\n\n"
-            markdown += f"**Файл**: `{media_file.name}`\n\n"
-            markdown += f"**Модель**: `{self.ears.model_size}`\n\n"
+            markdown += f"**Файл**: `{media_file.name}`\n"
+            markdown += f"**Модель**: `{self.ears.model_size}`\n"
+            markdown += f"**Язык**: `{transcript.language}`\n"
+            markdown += f"**Длительность**: `{transcript.duration:.1f}` секунд\n\n"
             markdown += "---\n\n"
             
-            # Добавляем сегменты с таймингами
-            for segment in transcript:
-                start_time = self._format_timestamp(segment['start'])
-                end_time = self._format_timestamp(segment['end'])
-                text = segment['text'].strip()
-                
-                markdown += f"**[{start_time} - {end_time}]**\n\n"
-                markdown += f"{text}\n\n"
+            # Добавляем транскрипт с таймингами
+            markdown += transcript.timed_transcript
+            markdown += "\n\n---\n\n"
+            markdown += "## Полный текст (без таймингов)\n\n"
+            markdown += transcript.full_text
+            markdown += "\n"
             
             # Сохраняем
             transcript_file.write_text(markdown, encoding='utf-8')
             
-            print(f"   ✅ Сохранено: transcript.md")
+            print(f"✅ Сохранено: transcript.md ({transcript_file.stat().st_size / 1024:.1f} KB)")
+            print(f"{'='*70}")
+            print(f"🎉 ТРАНСКРИБАЦИЯ ЗАВЕРШЕНА УСПЕШНО")
+            print(f"{'='*70}\n")
+            
             return transcript_file
             
         except Exception as e:
-            print(f"   ❌ Ошибка транскрибации: {e}")
+            print(f"\n{'='*70}")
+            print(f"❌ ОШИБКА ТРАНСКРИБАЦИИ")
+            print(f"{'='*70}")
+            print(f"Ошибка: {e}")
             import traceback
             traceback.print_exc()
+            print(f"{'='*70}\n")
             return None
     
     def _format_timestamp(self, seconds: float) -> str:
@@ -176,9 +206,11 @@ class TranscriptionProcessor:
             'error': None
         }
         
+        print(f"\n📂 Проверка папки: {folder.name[:80]}...")
+        
         # Проверяем, есть ли уже транскрипция
         if self.has_transcript(folder):
-            print(f"⏭️  Пропуск: {folder.name} (transcript.md существует)")
+            print(f"   ⏭️  Пропуск: транскрипция уже существует")
             stats['already_has_transcript'] = True
             return stats
         
@@ -186,12 +218,14 @@ class TranscriptionProcessor:
         media_files = self.find_media_files(folder)
         
         if not media_files:
-            print(f"⏭️  Пропуск: {folder.name} (нет медиа файлов)")
+            print(f"   ⏭️  Пропуск: нет медиа файлов")
             stats['no_media'] = True
             return stats
         
         # Берем первый медиа файл (обычно один)
         media_file = media_files[0]
+        
+        print(f"   ▶️  Найден медиа файл: {media_file.name}")
         
         # Транскрибируем
         transcript_file = self.transcribe_file(media_file, folder)
@@ -215,15 +249,19 @@ class TranscriptionProcessor:
         print("="*70)
         print(f"📁 Директория: {self.content_dir}")
         print(f"🤖 Модель Whisper: {self.ears.model_size}")
+        print(f"⏱️  Время запуска: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*70)
         
         # Находим папки
+        print(f"\n🔍 Сканирование директории...")
         folders = self.find_content_folders()
         
         if not folders:
             print("\n⚠️  Папки с контентом не найдены")
+            print("="*70)
             return {'total_folders': 0}
         
-        print(f"📊 Найдено папок: {len(folders)}")
+        print(f"✅ Найдено папок: {len(folders)}")
         
         # Общая статистика
         total_stats = {
@@ -231,13 +269,16 @@ class TranscriptionProcessor:
             'already_has_transcript': 0,
             'no_media': 0,
             'successfully_transcribed': 0,
-            'errors': 0
+            'errors': 0,
+            'start_time': __import__('time').time()
         }
         
         # Обрабатываем каждую папку
         for i, folder in enumerate(folders, 1):
             print(f"\n{'='*70}")
-            print(f"📂 [{i}/{len(folders)}] {folder.name}")
+            print(f"📂 ПАПКА [{i}/{len(folders)}]")
+            print(f"{'='*70}")
+            print(f"📌 {folder.name[:80]}")
             print(f"{'='*70}")
             
             stats = self.process_folder(folder)
@@ -248,20 +289,44 @@ class TranscriptionProcessor:
                 total_stats['no_media'] += 1
             elif stats['success']:
                 total_stats['successfully_transcribed'] += 1
+                print(f"\n✅ [{i}/{len(folders)}] Завершено успешно")
             else:
                 total_stats['errors'] += 1
+                print(f"\n❌ [{i}/{len(folders)}] Ошибка обработки")
+        
+        # Вычисляем время
+        elapsed_time = __import__('time').time() - total_stats['start_time']
+        hours = int(elapsed_time // 3600)
+        minutes = int((elapsed_time % 3600) // 60)
+        seconds = int(elapsed_time % 60)
         
         # Итоговая статистика
         print("\n" + "="*70)
         print("📊 ИТОГОВАЯ СТАТИСТИКА")
         print("="*70)
-        print(f"Всего папок: {total_stats['total_folders']}")
-        print(f"Уже есть транскрипция: {total_stats['already_has_transcript']}")
-        print(f"Нет медиа файлов: {total_stats['no_media']}")
-        print(f"Успешно транскрибировано: {total_stats['successfully_transcribed']}")
+        print(f"📂 Всего папок: {total_stats['total_folders']}")
+        print(f"⏭️  Уже есть транскрипция: {total_stats['already_has_transcript']}")
+        print(f"⏭️  Нет медиа файлов: {total_stats['no_media']}")
+        print(f"✅ Успешно транскрибировано: {total_stats['successfully_transcribed']}")
         if total_stats['errors'] > 0:
-            print(f"Ошибок: {total_stats['errors']}")
+            print(f"❌ Ошибок: {total_stats['errors']}")
+        
+        # Время выполнения
+        if hours > 0:
+            print(f"⏱️  Время выполнения: {hours}ч {minutes}м {seconds}с")
+        elif minutes > 0:
+            print(f"⏱️  Время выполнения: {minutes}м {seconds}с")
+        else:
+            print(f"⏱️  Время выполнения: {seconds}с")
+        
         print("="*70)
+        
+        if total_stats['successfully_transcribed'] > 0:
+            print(f"\n🎉 Транскрибация завершена успешно!")
+        else:
+            print(f"\n⚠️  Новых транскрипций не создано")
+        
+        print("="*70 + "\n")
         
         return total_stats
 
