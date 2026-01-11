@@ -315,13 +315,13 @@ class ProductionYouTubeGrabber:
         """Строит команду yt-dlp с обходом блокировок"""
         cmd = ['yt-dlp']
         
-        # Client config
-        client_config = self._get_client_config()
-        cmd.extend(['--user-agent', client_config['user_agent']])
+        # Client config - disabled, yt-dlp default works better
+        # client_config = self._get_client_config()
+        # cmd.extend(['--user-agent', client_config['user_agent']])
         
-        # Headers
-        for key, value in client_config['headers'].items():
-            cmd.extend(['--add-header', f'{key}:{value}'])
+        # Headers - disabled, can cause YouTube blocks
+        # for key, value in client_config['headers'].items():
+        #     cmd.extend(['--add-header', f'{key}:{value}'])
         
         # Cookies
         cookie_file = self.cookie_manager.get_best_cookie()
@@ -335,8 +335,8 @@ class ProductionYouTubeGrabber:
             '--max-sleep-interval', str(self.rate_limit_period * 1.5),
         ])
         
-        # No warnings
-        cmd.append('--no-warnings')
+        # No warnings and quiet mode for clean JSON output
+        cmd.extend(['--no-warnings', '--quiet'])
         
         # Extra args
         if extra_args:
@@ -419,6 +419,7 @@ class ProductionYouTubeGrabber:
     def download_video(
         self,
         url: str,
+        output_dir: Optional[Path] = None,
         quality: str = 'best'
     ) -> Optional[Path]:
         """
@@ -426,6 +427,7 @@ class ProductionYouTubeGrabber:
         
         Args:
             url: YouTube URL
+            output_dir: Директория для сохранения (если None, используется self.output_dir)
             quality: Качество видео
         
         Returns:
@@ -436,14 +438,17 @@ class ProductionYouTubeGrabber:
         self.total_requests += 1
         cookie_file = self.cookie_manager.get_best_cookie()
         
-        # Извлекаем video ID
-        video_id_match = re.search(r'(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+        # Используем переданную директорию или дефолтную
+        target_dir = output_dir if output_dir else self.output_dir
+        
+        # Извлекаем video ID (поддерживает /watch, /shorts, youtu.be)
+        video_id_match = re.search(r'(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
         if not video_id_match:
             print("❌ Невалидный URL")
             return None
         
         video_id = video_id_match.group(1)
-        output_template = str(self.output_dir / f"{video_id}.%(ext)s")
+        output_template = str(target_dir / f"{video_id}.%(ext)s")
         
         try:
             cmd = self._build_command(url, [
@@ -465,8 +470,8 @@ class ProductionYouTubeGrabber:
                 self._rotate_client()
                 raise Exception(result.stderr)
             
-            # Ищем скачанный файл
-            video_files = list(self.output_dir.glob(f"{video_id}.*"))
+            # Ищем скачанный файл в правильной директории
+            video_files = list(target_dir.glob(f"{video_id}.*"))
             if video_files:
                 video_path = video_files[0]
                 self.successful_requests += 1

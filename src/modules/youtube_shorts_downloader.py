@@ -20,7 +20,7 @@ from .downloader_utils import (
     format_duration,
     format_count
 )
-from .youtube_grabber_v2 import ProductionYouTubeGrabber
+from .youtube_grabber_v2 import ProductionYouTubeGrabber, ImprovedCookieManager
 
 
 class YouTubeShortsDownloader(BaseDownloader):
@@ -35,15 +35,19 @@ class YouTubeShortsDownloader(BaseDownloader):
     def __init__(self, settings: DownloadSettings):
         super().__init__(settings)
         
-        # Определяем cookies_dir
-        cookies_dir = None
+        # Создаем cookie manager
+        cookie_manager = None
         if settings.youtube_cookies_dir:
-            cookies_dir = settings.youtube_cookies_dir
+            cookie_manager = ImprovedCookieManager(cookies_dir=settings.youtube_cookies_dir)
+            # Добавляем все YouTube cookies
+            for cookie_file in settings.youtube_cookies_dir.glob('youtube_cookies*.txt'):
+                cookie_manager.add_cookies(cookie_file)
         elif settings.youtube_cookies:
-            cookies_dir = settings.youtube_cookies.parent
+            cookie_manager = ImprovedCookieManager(cookies_dir=settings.youtube_cookies.parent)
+            cookie_manager.add_cookies(settings.youtube_cookies)
         
         # Используем тот же ProductionYouTubeGrabber
-        self.grabber = ProductionYouTubeGrabber(cookies_dir=cookies_dir)
+        self.grabber = ProductionYouTubeGrabber(cookie_manager=cookie_manager)
     
     def can_handle(self, url: str) -> bool:
         """Проверяет, может ли обработать URL"""

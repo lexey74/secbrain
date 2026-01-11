@@ -150,21 +150,29 @@ class InstagramReelsDownloader(BaseDownloader):
                 check=True
             )
             
-            # Парсим JSON
-            lines = result.stdout.strip().split('\n')
-            if not lines:
-                raise ValueError("Не удалось получить метаданные")
+            # Парсим JSON array от gallery-dl
+            # Формат: [[code, metadata], [code, url, metadata], ...]
+            data = json.loads(result.stdout)
             
-            data = json.loads(lines[0])
+            # Ищем первый dict с reel метаданными
+            metadata = None
+            for item in data:
+                if isinstance(item, list) and len(item) >= 2:
+                    if isinstance(item[1], dict) and ('post_id' in item[1] or 'username' in item[1]):
+                        metadata = item[1]
+                        break
+            
+            if not metadata:
+                raise ValueError("Не удалось найти метаданные в ответе gallery-dl")
             
             return {
-                'author': data.get('username', 'unknown'),
-                'title': data.get('description', ''),
-                'likes': data.get('likes', 0),
-                'comments': data.get('comments', 0),
-                'views': data.get('video_view_count', 0),
-                'duration': data.get('video_duration', 0),
-                'date': data.get('date'),
+                'author': metadata.get('username', 'unknown'),
+                'title': metadata.get('description', ''),
+                'likes': metadata.get('likes', 0),
+                'comments': metadata.get('comments', 0),
+                'views': metadata.get('video_view_count', 0),
+                'duration': metadata.get('video_duration', 0),
+                'date': metadata.get('date'),
             }
             
         except subprocess.CalledProcessError as e:

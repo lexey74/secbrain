@@ -52,10 +52,12 @@ Thumbs.db
 
 # SecBrain specific - sensitive data
 cookies.txt
+cookies/
 session.json
 config.json
 known_tags.json
 
 # SecBrain output directories
 SecondBrain_Inbox/
+downloads/
 .temp/
