@@ -325,6 +325,30 @@ class TranscriptionProcessor:
             print(f"\n🎉 Транскрибация завершена успешно!")
         else:
             print(f"\n⚠️  Новых транскрипций не создано")
+            
+            # Подсчитываем, что осталось обработать
+            pending_transcribe = 0
+            pending_ai = 0
+            
+            for folder in folders:
+                has_transcript = (folder / "transcript.md").exists()
+                has_analysis = (folder / "analysis.md").exists()
+                
+                # Проверяем наличие медиа файлов
+                media_files = [
+                    f for f in folder.iterdir() 
+                    if f.is_file() and f.suffix.lower() in self.media_extensions
+                ]
+                
+                if media_files and not has_transcript:
+                    pending_transcribe += 1
+                elif has_transcript and not has_analysis:
+                    pending_ai += 1
+            
+            if pending_transcribe > 0 or pending_ai > 0:
+                print(f"\n📋 Статус обработки:")
+                print(f"   🎤 Требуют транскрибации: {pending_transcribe}")
+                print(f"   🤖 Требуют AI анализа: {pending_ai}")
         
         print("="*70 + "\n")
         

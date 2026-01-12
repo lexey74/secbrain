@@ -386,6 +386,37 @@ processed: true
             print(f"Ошибок: {total_stats['errors']}")
         print("="*70)
         
+        # Если ничего не обработано, показываем что осталось
+        if total_stats['successfully_processed'] == 0:
+            print(f"\n⚠️  Новых анализов не создано")
+            
+            # Подсчитываем, что осталось обработать
+            video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+            pending_transcribe = 0
+            pending_ai = 0
+            
+            for folder in folders:
+                has_transcript = (folder / "transcript.md").exists()
+                has_analysis = (folder / "analysis.md").exists()
+                
+                # Проверяем наличие видео файлов
+                video_files = [
+                    f for f in folder.iterdir() 
+                    if f.is_file() and f.suffix.lower() in video_extensions
+                ]
+                
+                if video_files and not has_transcript:
+                    pending_transcribe += 1
+                elif has_transcript and not has_analysis:
+                    pending_ai += 1
+            
+            if pending_transcribe > 0 or pending_ai > 0:
+                print(f"\n📋 Статус обработки:")
+                print(f"   🎤 Требуют транскрибации: {pending_transcribe}")
+                print(f"   🤖 Требуют AI анализа: {pending_ai}")
+            
+            print("="*70)
+        
         return total_stats
 
 
