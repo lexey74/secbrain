@@ -1052,11 +1052,45 @@ async def get_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Отправляем файлы
     sent_count = 0
     error_count = 0
+    skipped_large = []  # Список слишком больших файлов
+    
+    # Лимит размера файла Telegram (50 MB)
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB в байтах
     
     for file_path in files_to_send:
         try:
+            # Проверяем размер файла
+            file_size = file_path.stat().st_size
+            if file_size > MAX_FILE_SIZE:
+                size_mb = file_size / (1024 * 1024)
+                logger.warning(f"Skipping large file {file_path.name}: {size_mb:.1f} MB (limit: 50 MB)")
+                skipped_large.append((file_path.name, size_mb))
+                continue
+            
             # Определяем тип файла по расширению
             file_ext = file_path.suffix.lower()
+            
+            # Отправляем индикатор действия в зависимости от типа файла
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                await context.bot.send_chat_action(
+                    chat_id=query.message.chat_id,
+                    action='upload_photo'
+                )
+            elif file_ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                await context.bot.send_chat_action(
+                    chat_id=query.message.chat_id,
+                    action='upload_video'
+                )
+            elif file_ext in ['.mp3', '.m4a', '.wav', '.flac', '.ogg']:
+                await context.bot.send_chat_action(
+                    chat_id=query.message.chat_id,
+                    action='upload_audio'
+                )
+            else:
+                await context.bot.send_chat_action(
+                    chat_id=query.message.chat_id,
+                    action='upload_document'
+                )
             
             # Читаем файл
             with open(file_path, 'rb') as f:
@@ -1100,7 +1134,7 @@ async def get_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             sent_count += 1
             
         except Exception as e:
-            logger.error(f"Error sending file {file_path.name}: {e}")
+            logger.error(f"Error sending file {file_path.name}: {e}", exc_info=True)
             error_count += 1
             continue
     
@@ -1108,6 +1142,14 @@ async def get_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     result_text = f"✅ <b>Отправка завершена</b>\n\n"
     result_text += f"📂 Папка: <code>{display_name}</code>\n"
     result_text += f"📤 Отправлено: {sent_count} файлов\n"
+    
+    if len(skipped_large) > 0:
+        result_text += f"⚠️ Пропущено (размер > 50 MB): {len(skipped_large)} файлов\n"
+        for fname, fsize in skipped_large[:3]:  # Показываем первые 3
+            result_text += f"   • {fname} ({fsize:.1f} MB)\n"
+        if len(skipped_large) > 3:
+            result_text += f"   • и ещё {len(skipped_large) - 3}...\n"
+    
     if error_count > 0:
         result_text += f"❌ Ошибок: {error_count} файлов\n"
     
