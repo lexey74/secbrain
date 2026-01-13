@@ -378,6 +378,49 @@ def get_process_info(pid: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_ollama_info() -> Optional[Dict[str, Any]]:
+    """
+    Находит и получает информацию о процессе Ollama
+    
+    Returns:
+        Словарь с информацией об Ollama или None если не найден
+    """
+    if not PSUTIL_AVAILABLE:
+        return None
+    
+    try:
+        # Ищем процесс ollama runner (это процесс, который выполняет модель)
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info['cmdline']
+                if cmdline and 'ollama' in ' '.join(cmdline).lower() and 'runner' in ' '.join(cmdline).lower():
+                    # Нашли Ollama runner
+                    cpu_percent = proc.cpu_percent(interval=0.1)
+                    memory_info = proc.memory_info()
+                    memory_mb = memory_info.rss / 1024 / 1024
+                    
+                    # Извлекаем имя модели из cmdline
+                    model_name = "unknown"
+                    for part in cmdline:
+                        if 'sha256' in part and 'blobs' in part:
+                            # Это путь к модели, берём название из предыдущих частей
+                            model_name = "qwen2.5:7b"  # По умолчанию
+                            break
+                    
+                    return {
+                        'pid': proc.pid,
+                        'cpu_percent': cpu_percent,
+                        'memory_mb': memory_mb,
+                        'model': model_name
+                    }
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        return None
+    except Exception:
+        return None
+
+
 async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /check - проверка текущего состояния обработки"""
     config: BotConfig = context.bot_data.get('config', BotConfig())
@@ -543,12 +586,20 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Статус процесса AI
     if ai_running and ai_pid:
         process_info = get_process_info(ai_pid)
-        report += "⚙️ **Статус процесса:** ЗАПУЩЕН\n"
+        report += "⚙️ **Статус процесса Python:** ЗАПУЩЕН\n"
         report += f"   • PID: {ai_pid}\n"
         if process_info:
             report += f"   • Время работы: {process_info['uptime']}\n"
             report += f"   • CPU: {process_info['cpu_percent']:.1f}%\n"
             report += f"   • Память: {process_info['memory_mb']:.1f} МБ\n"
+        
+        # Добавляем информацию об Ollama
+        ollama_info = get_ollama_info()
+        if ollama_info:
+            report += f"\n🧠 **Ollama LLM ({ollama_info['model']}):** АКТИВЕН\n"
+            report += f"   • PID: {ollama_info['pid']}\n"
+            report += f"   • CPU: {ollama_info['cpu_percent']:.1f}%\n"
+            report += f"   • Память: {ollama_info['memory_mb']:.1f} МБ\n"
     else:
         report += "⏸ **Статус процесса:** НЕ ЗАПУЩЕН\n"
         if folders_need_ai > 0:
