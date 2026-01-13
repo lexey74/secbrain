@@ -978,8 +978,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await status_msg.edit_text(
                 f"✅ Файл сохранён!\n\n"
                 f"📂 Папка: `{folder_name}`\n\n"
-                f"Отправьте описание для этого файла\n"
-                f"(или /skip чтобы пропустить)"
+                f"📝 **О чем этот материал?**\n\n"
+                f"Расскажи в нескольких словах - это поможет организовать контент.\n\n"
+                f"💡 Примеры:\n"
+                f"• Лекция о нейросетях\n"
+                f"• Рецепт пасты карбонара\n"
+                f"• Заметки с митинга\n\n"
+                f"Или отправь /skip чтобы пропустить",
+                parse_mode='Markdown'
             )
         
         return WAITING_DESCRIPTION
@@ -1032,29 +1038,34 @@ async def handle_transcribe_callback(update: Update, context: ContextTypes.DEFAU
                 await query.edit_message_text(
                     f"✅ Транскрипция готова!\n\n"
                     f"📂 Папка: `{output_dir.name}`\n\n"
-                    f"Отправьте описание для этого видео\n"
-                    f"(или /skip чтобы пропустить)",
+                    f"📝 **О чем это видео?**\n\n"
+                    f"Опиши содержание в нескольких словах.\n\n"
+                    f"💡 Например: _Лекция о Python_ или _Обзор нового гаджета_\n\n"
+                    f"Или отправь /skip",
                     parse_mode='Markdown'
                 )
             else:
                 await query.edit_message_text(
                     "⚠️ Не удалось транскрибировать\n\n"
-                    "Отправьте описание для этого видео\n"
-                    "(или /skip чтобы пропустить)"
+                    "📝 **О чем это видео?**\n\n"
+                    "Опиши содержание в нескольких словах или отправь /skip",
+                    parse_mode='Markdown'
                 )
                 
         except Exception as e:
             logger.error(f"Transcription error: {e}", exc_info=True)
             await query.edit_message_text(
                 f"❌ Ошибка транскрибации: {str(e)[:100]}\n\n"
-                "Отправьте описание (или /skip)"
+                "📝 Опиши содержание видео (или /skip)",
+                parse_mode='Markdown'
             )
     
     elif query.data == "skip_transcribe":
         await query.edit_message_text(
             "⏭ Транскрибация пропущена\n\n"
-            "Отправьте описание для этого файла\n"
-            "(или /skip чтобы пропустить)"
+            "📝 **О чем этот материал?**\n\n"
+            "Опиши содержание в нескольких словах или отправь /skip",
+            parse_mode='Markdown'
         )
     
     return WAITING_DESCRIPTION
@@ -1076,14 +1087,63 @@ async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE)
     with open(desc_path, 'w', encoding='utf-8') as f:
         f.write(f"# Описание\n\n{description}")
     
+    # Переименовываем папку по описанию
+    try:
+        from datetime import datetime
+        
+        # Извлекаем компоненты из текущего имени папки
+        # Формат: {YYYY-MM-DD}_{HH-MM}_{Platform}_{SlugTitle}
+        old_name = output_dir.name
+        parts = old_name.split('_', 3)  # Разделяем на 4 части максимум
+        
+        if len(parts) >= 3:
+            date_part = parts[0]      # YYYY-MM-DD
+            time_part = parts[1]      # HH-MM
+            platform = parts[2]       # telegram/temp/etc
+            
+            # Очищаем описание для использования в имени
+            clean_desc = sanitize_filename(description, max_length=50)
+            
+            # Формируем новое имя папки
+            new_folder_name = f"{date_part}_{time_part}_{platform}_{clean_desc}"
+            new_output_dir = output_dir.parent / new_folder_name
+            
+            # Переименовываем, если новое имя отличается
+            if new_output_dir != output_dir:
+                output_dir.rename(new_output_dir)
+                output_dir = new_output_dir
+                
+                await update.message.reply_text(
+                    f"✅ Описание сохранено и папка переименована!\n\n"
+                    f"📂 Новое имя: `{new_folder_name}`",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ Описание сохранено!\n\n"
+                    f"📂 Папка: `{output_dir.name}`",
+                    parse_mode='Markdown'
+                )
+        else:
+            # Если формат папки не распознан, просто сохраняем описание
+            await update.message.reply_text(
+                f"✅ Описание сохранено!\n\n"
+                f"📂 Папка: `{output_dir.name}`",
+                parse_mode='Markdown'
+            )
+    
+    except Exception as e:
+        logger.error(f"Error renaming folder: {e}", exc_info=True)
+        # Даже если переименование не удалось, описание уже сохранено
+        await update.message.reply_text(
+            f"✅ Описание сохранено!\n\n"
+            f"📂 Папка: `{output_dir.name}`\n\n"
+            f"⚠️ Не удалось переименовать папку: {str(e)[:100]}",
+            parse_mode='Markdown'
+        )
+    
     # Очищаем состояние
     context.user_data.pop('pending_media', None)
-    
-    await update.message.reply_text(
-        f"✅ Описание сохранено!\n\n"
-        f"📂 Папка: `{output_dir.name}`",
-        parse_mode='Markdown'
-    )
     
     return ConversationHandler.END
 
