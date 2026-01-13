@@ -48,6 +48,10 @@ htmlcov/
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Project specific - Archived files
+archive/
 
 # Environment variables
 .env
