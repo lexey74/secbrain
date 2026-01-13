@@ -55,12 +55,10 @@ class AIProcessor:
             print(f"❌ Директория не найдена: {self.content_dir}")
             return []
         
+        # Сканируем ВСЕ папки в downloads (не только instagram/youtube)
         folders = []
         for item in self.content_dir.iterdir():
-            if item.is_dir() and (
-                item.name.startswith('instagram_') or 
-                item.name.startswith('youtube_')
-            ):
+            if item.is_dir():
                 folders.append(item)
         
         return sorted(folders)
@@ -184,6 +182,7 @@ class AIProcessor:
             tags = summary.get('tags', [])
             
             # Добавляем новые теги в базу
+            new_count = 0
             if tags:
                 new_count = self.tag_manager.add_tags(tags)
                 if new_count > 0:
@@ -195,7 +194,7 @@ class AIProcessor:
             return {
                 'summary': summary,
                 'tags': tags,
-                'new_tags': new_tags,
+                'new_tags_count': new_count,
                 'has_description': description is not None,
                 'has_transcript': transcript is not None,
                 'image_count': len(images)
@@ -376,7 +375,7 @@ processed: true
         
         if note_file:
             stats['success'] = True
-            stats['new_tags'] = len(analysis.get('new_tags', []))
+            stats['new_tags'] = analysis.get('new_tags_count', 0)
         else:
             stats['error'] = "Ошибка создания Knowledge.md"
         

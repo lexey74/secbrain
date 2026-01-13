@@ -47,12 +47,10 @@ class TranscriptionProcessor:
             print(f"❌ Директория не найдена: {self.content_dir}")
             return []
         
+        # Сканируем ВСЕ папки в downloads (не только instagram/youtube)
         folders = []
         for item in self.content_dir.iterdir():
-            if item.is_dir() and (
-                item.name.startswith('instagram_') or 
-                item.name.startswith('youtube_')
-            ):
+            if item.is_dir():
                 folders.append(item)
         
         return sorted(folders)
