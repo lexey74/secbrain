@@ -257,12 +257,24 @@ processed: true
 
 ## 📝 Саммари
 
-{analysis['summary']}
+{analysis['summary'].get('summary', 'Нет саммари') if isinstance(analysis['summary'], dict) else str(analysis['summary'])}
 
-## 📎 Связанные файлы
+## 📂 Категория
 
-- [[description.md|Описание]]
+{analysis['summary'].get('category', 'Не указана') if isinstance(analysis['summary'], dict) else 'Не указана'}
+
+## 💬 Ценные комментарии
+
 """
+        
+        # Добавляем ценные комментарии если есть
+        if isinstance(analysis['summary'], dict) and analysis['summary'].get('valuable_comments'):
+            for comment in analysis['summary']['valuable_comments']:
+                markdown += f"- {comment}\n"
+        else:
+            markdown += "*Нет ценных комментариев*\n"
+        
+        markdown += "\n## 📎 Связанные файлы\n\n- [[description.md|Описание]]\n"
         
         if analysis['has_transcript']:
             markdown += "- [[transcript.md|Транскрипция]]\n"

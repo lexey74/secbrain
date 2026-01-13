@@ -41,7 +41,21 @@ Pipeline: Download (Social Media) -> Transcribe (Whisper) -> Analyze (Ollama) ->
 ## 3. Data Formatting (Obsidian Target)
 - **Output:** Files must be valid Markdown (`.md`).
 - **Frontmatter:** Every file MUST start with YAML frontmatter delimited by `---`.
-- **Fields:** Include `source_url`, `author`, `date`, `tags` (JSON array format), `summary`.
+- **Required Files:**
+  - `description.md` - MUST have frontmatter with `author`, `date`, `type: description`
+  - `transcript.md` - MUST have frontmatter with `title`, `date`, `media_file`, `whisper_model`, `language`, `duration`, `type: transcript`
+  - `Knowledge.md` - MUST have frontmatter with `title`, `date`, `tags`, `source`, `processed: true`
+- **Frontmatter Fields:**
+  - `title` - название контента
+  - `author` - автор (если известен)
+  - `date` - дата в формате YYYY-MM-DD
+  - `tags` - массив тегов
+  - `source` - платформа (instagram, youtube, telegram)
+  - `type` - тип файла (description, transcript, knowledge)
+- **Content Structure:**
+  - Все медиа файлы ТОЛЬКО внутри папок (НЕ в корне downloads/)
+  - Каждая папка: `{platform}_{id}_{title}/`
+  - AI summary должен быть в читаемом формате, НЕ сырой dict
 
 ## 4. AI & Resource Management
 - **Ollama:** Use specific models (`llama3.2` for summaries, `qwen2.5:7b` for complex logic). Keep prompts concise.

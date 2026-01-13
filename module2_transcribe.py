@@ -132,8 +132,20 @@ class TranscriptionProcessor:
             
             print(f"\n📝 Сохранение в Markdown...")
             
-            # Формируем Markdown
-            markdown = f"# Транскрипция\n\n"
+            # Формируем Markdown с YAML frontmatter
+            from datetime import datetime
+            
+            markdown = "---\n"
+            markdown += f"title: Транскрипция {media_file.stem}\n"
+            markdown += f"date: {datetime.now().strftime('%Y-%m-%d')}\n"
+            markdown += f"media_file: {media_file.name}\n"
+            markdown += f"whisper_model: {self.ears.model_size}\n"
+            markdown += f"language: {transcript.language}\n"
+            markdown += f"duration: {transcript.duration:.1f}\n"
+            markdown += f"type: transcript\n"
+            markdown += "---\n\n"
+            
+            markdown += f"# Транскрипция\n\n"
             markdown += f"**Файл**: `{media_file.name}`\n"
             markdown += f"**Модель**: `{self.ears.model_size}`\n"
             markdown += f"**Язык**: `{transcript.language}`\n"

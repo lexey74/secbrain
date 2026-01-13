@@ -239,7 +239,27 @@ class BaseDownloader(ABC):
         """
         desc_file = folder_path / 'description.md'
         
+        # Формируем YAML frontmatter
+        from datetime import datetime
+        
         with open(desc_file, 'w', encoding='utf-8') as f:
+            # YAML frontmatter
+            f.write('---\n')
+            if author:
+                f.write(f'author: {author}\n')
+            if date:
+                f.write(f'date: {date}\n')
+            else:
+                f.write(f'date: {datetime.now().strftime("%Y-%m-%d")}\n')
+            f.write(f'type: description\n')
+            if additional_info:
+                for key, value in additional_info.items():
+                    # Экранируем специальные символы для YAML
+                    safe_value = str(value).replace(':', ' -').replace('\n', ' ')
+                    f.write(f'{key}: {safe_value}\n')
+            f.write('---\n\n')
+            
+            # Markdown body
             f.write('# Description\n\n')
             
             if author:
