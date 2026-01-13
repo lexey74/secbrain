@@ -234,8 +234,28 @@ ollama list
 "whisper_model": "tiny"  // вместо "base"
 ```
 
+## 🧪 Testing
+
+Unit tests are available using pytest:
+
+```bash
+# Run all tests
+pytest tests/
+
+# With coverage report
+pytest tests/ --cov=src/modules --cov-report=term-missing
+
+# Verbose output
+pytest tests/ -v
+```
+
+**Test Results**: ✅ 23 tests passing | Coverage: 76-86% on core modules (TagManager, LocalEars)
+
+See [tests/README.md](tests/README.md) for detailed test documentation.
+
 ## 📝 TODO
 
+- [x] Unit тесты для core модулей (TagManager, LocalEars, LocalBrain, HybridGrabber)
 - [ ] Завершить реализацию `instagrapi` для комментариев
 - [ ] Добавить прогресс-бар для транскрибации
 - [ ] Поддержка карусели (множественные фото)
