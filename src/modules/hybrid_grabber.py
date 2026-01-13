@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import re
 import json
 import shutil
+import hashlib
 
 
 @dataclass
@@ -276,7 +277,31 @@ class HybridGrabber:
                     if file.is_file() and file.suffix in ['.mp4', '.jpg', '.png', '.webp', '.jpeg']:
                         media_files.append(file)
                 
-                # Переименовываем первый файл в media.ext и копируем в корень output_dir
+                # Удаляем дубликаты по MD5 хешу
+                print(f"📦 Найдено медиа файлов: {len(media_files)}")
+                unique_files = []
+                seen_hashes = set()
+                
+                for file in media_files:
+                    # Вычисляем MD5 хеш файла
+                    md5_hash = hashlib.md5()
+                    with open(file, 'rb') as f:
+                        # Читаем файл частями для экономии памяти
+                        for chunk in iter(lambda: f.read(8192), b''):
+                            md5_hash.update(chunk)
+                    file_hash = md5_hash.hexdigest()
+                    
+                    # Проверяем, не встречали ли мы этот хеш ранее
+                    if file_hash not in seen_hashes:
+                        seen_hashes.add(file_hash)
+                        unique_files.append(file)
+                    else:
+                        print(f"⚠️  Пропущен дубликат: {file.name} (хеш: {file_hash[:8]}...)")
+                
+                media_files = unique_files
+                print(f"✅ Уникальных файлов: {len(media_files)}")
+                
+                # Переименовываем файлы и копируем в корень output_dir
                 if media_files:
                     # Создаем простые имена media_1, media_2, etc
                     renamed_files = []
