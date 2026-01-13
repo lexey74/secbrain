@@ -62,11 +62,31 @@ Thumbs.db
 # SecBrain specific - sensitive data
 cookies.txt
 cookies/
+*.json
+!config.example.json
+!package.json
 session.json
 config.json
 known_tags.json
+instagram_cookies.json
+test_*.json
 
 # SecBrain output directories
 SecondBrain_Inbox/
 downloads/
 .temp/
+temp/
+
+# Logs
+*.log
+logs/
+bot.log
+transcribe.log
+transcription_log.txt
+youtube_download_log.txt
+
+# PID files
+*.pid
+
+# Proxies and runtime data
+proxies.txt
