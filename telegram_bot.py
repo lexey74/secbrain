@@ -490,6 +490,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /transcribe - Запустить транскрибацию всех видео
 /ai - Запустить AI анализ и тегирование
 /check - Проверить статус обработки
+/get - Получить файлы из папки
 
 **📊 Процесс:**
 1. Создаётся папка в downloads/
@@ -747,13 +748,13 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Статус пользователя в очереди транскрибации
     if transcribe_status['status'] == 'running':
-        report += "⚙️ **Ваш статус:** ВЫПОЛНЯЕТСЯ\n"
+        report += "⚙️ **Статус обработки:** ВЫПОЛНЯЕТСЯ\n"
         report += f"   • PID: {transcribe_status['pid']}\n"
     elif transcribe_status['status'] == 'queued':
-        report += f"⏳ **Ваш статус:** В ОЧЕРЕДИ\n"
+        report += f"⏳ **Статус обработки:** В ОЧЕРЕДИ\n"
         report += f"   • Позиция: {transcribe_status['position']} из {transcribe_status['total']}\n"
     else:
-        report += "⏸ **Ваш статус:** НЕ ЗАПУЩЕНО\n"
+        report += "⏸ **Статус обработки:** НЕ ЗАПУЩЕНО\n"
         if folders_need_transcribe > 0:
             report += f"\n💡 Используйте /transcribe для обработки {folders_need_transcribe} папок\n"
     
@@ -778,13 +779,13 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Статус пользователя в очереди AI
     if ai_status['status'] == 'running':
-        report += "⚙️ **Ваш статус:** ВЫПОЛНЯЕТСЯ\n"
+        report += "⚙️ **Статус обработки:** ВЫПОЛНЯЕТСЯ\n"
         report += f"   • PID: {ai_status['pid']}\n"
     elif ai_status['status'] == 'queued':
-        report += f"⏳ **Ваш статус:** В ОЧЕРЕДИ\n"
+        report += f"⏳ **Статус обработки:** В ОЧЕРЕДИ\n"
         report += f"   • Позиция: {ai_status['position']} из {ai_status['total']}\n"
     else:
-        report += "⏸ **Ваш статус:** НЕ ЗАПУЩЕНО\n"
+        report += "⏸ **Статус обработки:** НЕ ЗАПУЩЕНО\n"
         if folders_need_ai > 0:
             report += f"\n💡 Используйте /ai для обработки {folders_need_ai} папок\n"
     
@@ -804,7 +805,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             report += f"   • CPU: {ollama_info['cpu_percent']:.1f}%\n"
             report += f"   • Память: {ollama_info['memory_mb']:.1f} МБ\n"
     else:
-        report += "⏸ **Статус процесса:** НЕ ЗАПУЩЕН\n"
+        report += "⏸ **Процесс обработки:** НЕ ЗАПУЩЕН\n"
         if folders_need_ai > 0:
             report += f"\n💡 Используйте /ai для обработки {folders_need_ai} папок\n"
     
@@ -860,6 +861,261 @@ async def tags_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "❌ Ошибка при загрузке тегов.\n"
             f"Детали: {str(e)[:200]}"
         )
+
+
+async def get_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /get - получение файлов из папки"""
+    config: BotConfig = context.bot_data.get('config', BotConfig())
+    user = update.effective_user
+    
+    # Получаем папку пользователя
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
+    if not user_folder.exists() or not list(user_folder.iterdir()):
+        await update.message.reply_text(
+            "📁 <b>Ваша папка пуста</b>\n\n"
+            "Отправьте ссылку или медиафайл для начала работы!",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Получаем список папок
+    folders = sorted(
+        [d for d in user_folder.iterdir() if d.is_dir()],
+        key=lambda x: x.stat().st_mtime,
+        reverse=True  # Новые папки первыми
+    )
+    
+    if not folders:
+        await update.message.reply_text(
+            "📁 <b>Нет доступных папок</b>\n\n"
+            "Папки пусты или отсутствуют.",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Сохраняем список папок в context для callback
+    context.user_data['get_folders'] = [f.name for f in folders]
+    
+    # Показываем первую страницу (page=0)
+    await show_folders_page(update.message, context, page=0, edit=False)
+
+
+async def show_folders_page(message, context: ContextTypes.DEFAULT_TYPE, page: int = 0, edit: bool = False):
+    """Показывает страницу с папками"""
+    folder_names = context.user_data.get('get_folders', [])
+    
+    logger.info(f"show_folders_page called: page={page}, folders={len(folder_names)}, edit={edit}")
+    
+    if not folder_names:
+        text = "📁 <b>Нет доступных папок</b>"
+        if edit:
+            await message.edit_text(text, parse_mode='HTML')
+        else:
+            await message.reply_text(text, parse_mode='HTML')
+        return
+    
+    # Пагинация
+    folders_per_page = 10
+    total_pages = (len(folder_names) + folders_per_page - 1) // folders_per_page
+    page = max(0, min(page, total_pages - 1))  # Ограничиваем диапазон
+    
+    start_idx = page * folders_per_page
+    end_idx = min(start_idx + folders_per_page, len(folder_names))
+    
+    # Создаём inline-кнопки для папок на текущей странице
+    keyboard = []
+    
+    for idx in range(start_idx, end_idx):
+        folder_name = folder_names[idx]
+        # Показываем читаемое имя (без префикса даты)
+        display_name = re.sub(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_', '', folder_name)
+        if len(display_name) > 50:
+            display_name = display_name[:47] + "..."
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                f"📂 {display_name}",
+                callback_data=f"get:{idx}"
+            )
+        ])
+    
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton("◀️ Назад", callback_data=f"page:{page-1}")
+        )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton("Вперёд ▶️", callback_data=f"page:{page+1}")
+        )
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    text = (
+        f"📂 <b>Выберите папку для загрузки</b>\n\n"
+        f"Всего папок: {len(folder_names)}\n"
+        f"Страница: {page + 1} из {total_pages}\n"
+        f"Показаны папки {start_idx + 1}-{end_idx}"
+    )
+    
+    if edit:
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
+
+
+
+async def get_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик callback для отправки файлов из папки"""
+    query = update.callback_query
+    await query.answer()
+    
+    config: BotConfig = context.bot_data.get('config', BotConfig())
+    user = update.effective_user
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
+    # Извлекаем данные из callback_data
+    callback_data = query.data
+    
+    # Обработка навигации по страницам
+    if callback_data.startswith("page:"):
+        try:
+            page_num = int(callback_data.replace("page:", ""))
+            await show_folders_page(query.message, context, page=page_num, edit=True)
+            await query.answer()
+            return
+        except ValueError:
+            await query.answer("❌ Неверный номер страницы", show_alert=True)
+            return
+    
+    # Обработка выбора папки
+    if not callback_data.startswith("get:"):
+        await query.answer("❌ Неверный формат", show_alert=True)
+        return
+    
+    # Получаем индекс папки
+    try:
+        folder_idx = int(callback_data.replace("get:", ""))
+    except ValueError:
+        await query.answer("❌ Неверный индекс", show_alert=True)
+        return
+    
+    # Получаем список папок из context
+    folder_names = context.user_data.get('get_folders', [])
+    
+    if folder_idx < 0 or folder_idx >= len(folder_names):
+        await query.edit_message_text(
+            "❌ <b>Папка не найдена</b>\n\n"
+            "Индекс вне диапазона. Попробуйте вызвать /get снова.",
+            parse_mode='HTML'
+        )
+        return
+    
+    folder_name = folder_names[folder_idx]
+    folder_path = user_folder / folder_name
+    
+    if not folder_path.exists() or not folder_path.is_dir():
+        await query.edit_message_text(
+            "❌ <b>Папка не найдена</b>\n\n"
+            "Возможно, она была удалена.",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Собираем все файлы из папки
+    all_files = sorted(folder_path.iterdir(), key=lambda x: x.name)
+    files_to_send = [f for f in all_files if f.is_file()]
+    
+    if not files_to_send:
+        await query.edit_message_text(
+            f"📂 <b>{folder_name}</b>\n\n"
+            "❌ Папка пуста - нет файлов для отправки.",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Показываем читаемое имя
+    display_name = re.sub(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_', '', folder_name)
+    
+    # Обновляем сообщение
+    await query.edit_message_text(
+        f"📂 <b>{display_name}</b>\n\n"
+        f"📤 Отправляю {len(files_to_send)} файлов...",
+        parse_mode='HTML'
+    )
+    
+    # Отправляем файлы
+    sent_count = 0
+    error_count = 0
+    
+    for file_path in files_to_send:
+        try:
+            # Определяем тип файла по расширению
+            file_ext = file_path.suffix.lower()
+            
+            # Читаем файл
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+            
+            # Отправляем в зависимости от типа
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=file_data,
+                    caption=f"📷 {file_path.name}"
+                )
+            elif file_ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+                await context.bot.send_video(
+                    chat_id=query.message.chat_id,
+                    video=file_data,
+                    caption=f"🎥 {file_path.name}"
+                )
+            elif file_ext in ['.mp3', '.m4a', '.wav', '.flac', '.ogg']:
+                await context.bot.send_audio(
+                    chat_id=query.message.chat_id,
+                    audio=file_data,
+                    caption=f"🎵 {file_path.name}"
+                )
+            elif file_ext in ['.md', '.txt']:
+                # Текстовые файлы отправляем как документ с превью
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=file_data,
+                    filename=file_path.name,
+                    caption=f"📄 {file_path.name}"
+                )
+            else:
+                # Все остальные как документы
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=file_data,
+                    filename=file_path.name
+                )
+            
+            sent_count += 1
+            
+        except Exception as e:
+            logger.error(f"Error sending file {file_path.name}: {e}")
+            error_count += 1
+            continue
+    
+    # Финальное сообщение
+    result_text = f"✅ <b>Отправка завершена</b>\n\n"
+    result_text += f"📂 Папка: <code>{display_name}</code>\n"
+    result_text += f"📤 Отправлено: {sent_count} файлов\n"
+    if error_count > 0:
+        result_text += f"❌ Ошибок: {error_count} файлов\n"
+    
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=result_text,
+        parse_mode='HTML'
+    )
 
 
 async def user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1658,7 +1914,12 @@ def main():
     application.add_handler(CommandHandler("url", url_command))
     application.add_handler(CommandHandler("ai", ai_command))
     application.add_handler(CommandHandler("tags", tags_command))
+    application.add_handler(CommandHandler("get", get_command))
     application.add_handler(CommandHandler("user", user_command))
+    
+    # Обработчик callback для /get (папки и пагинация)
+    application.add_handler(CallbackQueryHandler(get_folder_callback, pattern="^(get:|page:)"))
+    
     application.add_handler(media_conv_handler)
     application.add_handler(content_conv_handler)
     
