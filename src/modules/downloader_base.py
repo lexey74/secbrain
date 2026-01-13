@@ -205,7 +205,13 @@ class BaseDownloader(ABC):
         Returns:
             Path к созданной папке
         """
+        from datetime import datetime
         from .downloader_utils import clean_filename
+        
+        # Получаем текущую дату и время
+        now = datetime.now()
+        date_prefix = now.strftime("%Y-%m-%d")
+        time_prefix = now.strftime("%H-%M")
         
         # Очищаем название
         clean_title = clean_filename(title)
@@ -214,8 +220,8 @@ class BaseDownloader(ABC):
         if len(clean_title) > 50:
             clean_title = clean_title[:50]
         
-        # Формируем имя папки
-        folder_name = f"{prefix}_{content_id}_{clean_title}"
+        # Формируем имя папки: {YYYY-MM-DD}_{HH-MM}_{Platform}_{SlugTitle}
+        folder_name = f"{date_prefix}_{time_prefix}_{prefix}_{clean_title}"
         folder_path = self.output_dir / folder_name
         folder_path.mkdir(parents=True, exist_ok=True)
         

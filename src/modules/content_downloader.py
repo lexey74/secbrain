@@ -181,11 +181,16 @@ class ContentDownloader:
         safe_title = self._sanitize_filename(title)
         
         # Ограничиваем длину названия
-        if len(safe_title) > 100:
-            safe_title = safe_title[:100]
+        if len(safe_title) > 50:
+            safe_title = safe_title[:50]
         
-        # Формат: {источник}_{ID}_{название}
-        folder_name = f"{source.value}_{content_id}_{safe_title}"
+        # Формат: {YYYY-MM-DD}_{HH-MM}_{Platform}_{SlugTitle}
+        from datetime import datetime
+        now = datetime.now()
+        date_prefix = now.strftime("%Y-%m-%d")
+        time_prefix = now.strftime("%H-%M")
+        
+        folder_name = f"{date_prefix}_{time_prefix}_{source.value}_{safe_title}"
         folder_path = self.output_dir / folder_name
         
         # Создаем папку

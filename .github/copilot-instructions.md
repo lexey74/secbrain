@@ -54,7 +54,8 @@ Pipeline: Download (Social Media) -> Transcribe (Whisper) -> Analyze (Ollama) ->
   - `type` - тип файла (description, transcript, knowledge)
 - **Content Structure:**
   - Все медиа файлы ТОЛЬКО внутри папок (НЕ в корне downloads/)
-  - Каждая папка: `{platform}_{id}_{title}/`
+  - Каждая папка: `{YYYY-MM-DD}_{HH-MM}_{Platform}_{SlugTitle}/`
+  - Пример: `2026-01-13_15-30_instagram_beautiful_sunset/`
   - AI summary должен быть в читаемом формате, НЕ сырой dict
 
 ## 4. AI & Resource Management
