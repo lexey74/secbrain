@@ -36,7 +36,7 @@ except ImportError:
 # Добавляем src в путь
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, User
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -121,6 +121,29 @@ WAITING_TITLE = 2
 # ============================================================================
 # Утилиты
 # ============================================================================
+
+def get_user_folder(user: User, base_dir: Path) -> Path:
+    """
+    Получает папку для конкретного пользователя
+    
+    Args:
+        user: Telegram User объект
+        base_dir: Базовая директория (обычно downloads/)
+        
+    Returns:
+        Path к пользовательской папке
+    """
+    # Формируем имя папки из username или id
+    if user.username:
+        folder_name = sanitize_filename(user.username, max_length=50)
+    else:
+        folder_name = f"user_{user.id}"
+    
+    user_folder = base_dir / folder_name
+    user_folder.mkdir(parents=True, exist_ok=True)
+    
+    return user_folder
+
 
 def sanitize_filename(name: str, max_length: int = 80) -> str:
     """Очистка имени для использования в пути к файлу"""
@@ -224,12 +247,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 /start - Это сообщение
 /help - Подробная справка
 /status - Статус системы
-/check - Проверить состояние папок
+/check - Проверить состояние твоих папок
 /transcribe - Транскрибировать последнее видео
 /url - Скачать по ссылке
 /ai - AI анализ (в разработке)
 /tags - Просмотр тегов (в разработке)
 /user - Информация о вас
+
+━━━━━━━━━━━━━━━━━━━━━━━
+👥 **Многопользовательский режим**
+Твои данные хранятся отдельно от других пользователей.
+Ты видишь только свой контент!
 
 🔒 **Privacy-First:** Все AI модели работают локально!
 🚀 Просто отправь мне что-нибудь!
@@ -444,9 +472,16 @@ def get_ollama_info() -> Optional[Dict[str, Any]]:
 async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /check - проверка текущего состояния обработки"""
     config: BotConfig = context.bot_data.get('config', BotConfig())
+    user = update.effective_user
     
-    if not config.downloads_dir.exists():
-        await update.message.reply_text("📁 Папка downloads пуста")
+    # Получаем пользовательскую папку
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
+    if not user_folder.exists() or not list(user_folder.iterdir()):
+        await update.message.reply_text(
+            f"📁 Ваша папка пуста\n\n"
+            f"Отправьте ссылку или медиафайл для начала работы!"
+        )
         return
     
     # Проверяем, запущена ли транскрибация
@@ -512,9 +547,9 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             config.ai_pid.unlink(missing_ok=True)
             ai_running = False
     
-    # Сканируем папки и собираем статистику
+    # Сканируем папки ТОЛЬКО текущего пользователя
     folders = sorted(
-        [d for d in config.downloads_dir.iterdir() if d.is_dir()],
+        [d for d in user_folder.iterdir() if d.is_dir()],
         key=lambda x: x.stat().st_mtime,
         reverse=True
     )
@@ -778,6 +813,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not url_type:
         return ConversationHandler.END  # Не URL, пропускаем
     
+    # Получаем пользовательскую папку
+    user = update.effective_user
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
     # Отправляем сообщение о начале обработки
     status_msg = await update.message.reply_text(
         f"⏳ Начинаю обработку {url_type.upper()} ссылки...\n"
@@ -811,9 +850,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Создаём роутер
         router = ContentRouter(settings)
         
-        # Устанавливаем output_dir для всех downloaders
+        # Устанавливаем output_dir для всех downloaders в пользовательскую папку
         for downloader in router.downloaders:
-            downloader.output_dir = config.downloads_dir
+            downloader.output_dir = user_folder
         
         # Скачиваем контент
         await status_msg.edit_text("📥 Скачиваю контент...")
@@ -831,9 +870,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         output_dir = Path(result.folder_path)
         
-        # Переименовываем папку во временную
+        # Переименовываем папку во временную (внутри пользовательской папки)
         temp_folder_name = f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        temp_output_dir = config.downloads_dir / temp_folder_name
+        temp_output_dir = user_folder / temp_folder_name
         output_dir.rename(temp_output_dir)
         output_dir = temp_output_dir
         
@@ -931,9 +970,13 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     else:
         return ConversationHandler.END
     
-    # Создаём папку
+    # Получаем пользовательскую папку
+    user = update.effective_user
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
+    # Создаём папку внутри пользовательской папки
     folder_name = create_folder_name(f"telegram_{media_type}")
-    output_dir = config.downloads_dir / folder_name
+    output_dir = user_folder / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Скачиваем файл
@@ -1181,9 +1224,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if detect_url_type(text):
         return await handle_url(update, context)
     
-    # Создаём временную папку для заметки
+    # Получаем пользовательскую папку
+    user = update.effective_user
+    user_folder = get_user_folder(user, config.downloads_dir)
+    
+    # Создаём временную папку для заметки (внутри пользовательской папки)
     temp_folder_name = f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_dir = config.downloads_dir / temp_folder_name
+    output_dir = user_folder / temp_folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Сохраняем текст
