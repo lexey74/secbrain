@@ -50,6 +50,17 @@ class HybridGrabber:
         self.last_request_time = 0
         self.min_delay = 3.0  # Минимальная задержка между запросами (секунды)
     
+    def setup_instagrapi(self, session_file: Path):
+        """
+        Заглушка для совместимости с pipeline.py
+        HybridGrabber использует gallery-dl, не требует instagrapi
+        
+        Args:
+            session_file: Путь к файлу сессии (не используется)
+        """
+        print("ℹ️  HybridGrabber использует gallery-dl, setup_instagrapi не требуется")
+        pass
+    
     def grab(self, url: str) -> InstagramContent:
         """
         Основной метод: парсинг через gallery-dl

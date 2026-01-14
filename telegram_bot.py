@@ -1322,40 +1322,6 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         output_dir.rename(temp_output_dir)
         output_dir = temp_output_dir
         
-        # Проверяем, есть ли видео для транскрибации
-        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
-        video_files = [
-            f for f in output_dir.iterdir() 
-            if f.suffix.lower() in video_extensions
-        ]
-        
-        if video_files:
-            await status_msg.edit_text("🎤 Транскрибирую видео...")
-            
-            # Инициализируем Whisper
-            ears = LocalEars(
-                model_size=config.whisper_model,
-                num_threads=config.whisper_threads
-            )
-            
-            # Транскрибируем первое видео
-            transcript_result = await loop.run_in_executor(
-                None,
-                lambda: ears.transcribe(video_files[0])
-            )
-            
-            if transcript_result:
-                # Сохраняем транскрипт
-                transcript_path = output_dir / "transcript.md"
-                with open(transcript_path, 'w', encoding='utf-8') as f:
-                    f.write(f"# Транскрипция\n\n")
-                    f.write(f"**Язык:** {transcript_result.language}\n")
-                    f.write(f"**Длительность:** {transcript_result.duration:.1f} сек\n\n")
-                    f.write("## С таймкодами\n\n")
-                    f.write(transcript_result.timed_transcript)
-                    f.write("\n\n## Полный текст\n\n")
-                    f.write(transcript_result.full_text)
-        
         # Сохраняем временную папку в контексте
         context.user_data['temp_folder'] = str(output_dir)
         context.user_data['content_type'] = url_type
@@ -1370,10 +1336,8 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 {chr(10).join('• ' + f for f in files_list[:10])}
 {'...' if len(files_list) > 10 else ''}
 
-{'🎤 Транскрипт создан!' if video_files else ''}
-
 📝 **Как озаглавим эту информацию?**
-Отправьте название (или /skip для автоматического, /show для просмотра)
+Отправьте название (или /skip для автоматического, /show для загрузки скачанной информации)
 """
         await status_msg.edit_text(success_text, parse_mode='Markdown')
         

@@ -433,7 +433,7 @@ class YouTubeGrabber:
         
         # 3. Загружаем видео (опционально)
         if download_video:
-            content.video_path = self.download_video(url)
+            content.video_path = self.download_video(url, quality='worst')
         
         # 4. Загружаем аудио (для транскрибации)
         if download_audio:

@@ -265,7 +265,7 @@ class ContentDownloader:
         
         # Сохраняем описание в Markdown
         description_file = folder_path / "description.md"
-        description_content = f"# {title}\n\n{result.caption or 'Нет описания'}\n"
+        description_content = f"# {title}\n\n## Ссылка\n\n{url}\n\n## Описание\n\n{result.caption or 'Нет описания'}\n"
         description_file.write_text(description_content, encoding='utf-8')
         
         # Копируем медиа файлы в папку проекта
@@ -349,7 +349,7 @@ class ContentDownloader:
         
         # Сохраняем описание в Markdown
         description_file = folder_path / "description.md"
-        description_content = f"# {title}\n\n## Описание\n\n{description}\n"
+        description_content = f"# {title}\n\n## Ссылка\n\n{url}\n\n## Описание\n\n{description}\n"
         description_file.write_text(description_content, encoding='utf-8')
         
         # Загружаем видео если нужно
@@ -361,7 +361,7 @@ class ContentDownloader:
                 cookies_file=str(cookies_file) if cookies_file.exists() else None
             )
             
-            video_path = temp_grabber.download_video(url, quality='best')
+            video_path = temp_grabber.download_video(url, quality='worst')
             if video_path:
                 media_files.append(video_path)
                 print(f"   ✅ {video_path.name}")
