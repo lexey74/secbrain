@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.modules.local_brain import LocalBrain
 from src.modules.tag_manager import TagManager
+import threading
 
 
 class AIProcessor:
@@ -291,6 +292,37 @@ processed: true
         try:
             note_file.write_text(markdown, encoding='utf-8')
             print(f"✅ Сохранено: Knowledge.md")
+            # После успешного сохранения — попробуем индексировать в RAG (если модуль доступен)
+            try:
+                # Импортируем лениво — если модуль4 отсутствует, ничего не делаем
+                from src.modules.module4_rag import RAGEngine
+
+                try:
+                    # Ищем корень пользователя (например downloads/{user_folder})
+                    # Предположим, что папка контента лежит внутри папки пользователя
+                    user_root = None
+                    for p in note_file.parents:
+                        if p.name and (p.parent.name == 'downloads' or '_' in p.name or p.parent == Path('downloads')):
+                            user_root = p
+                            break
+
+                    rag = RAGEngine(user_root=user_root)
+                    # Запускаем индексирование в фоне, чтобы не блокировать основной поток
+                    def _run_index():
+                        try:
+                            indexed = rag.index_folder(folder)
+                            print(f"   ✅ Indexed {indexed} chunks into user's RAG DB")
+                        except Exception as e:
+                            print(f"   ⚠️ RAG indexing failed (background): {e}")
+
+                    t = threading.Thread(target=_run_index, daemon=True)
+                    t.start()
+                except Exception as e:
+                    print(f"   ⚠️ RAG indexing failed: {e}")
+            except ImportError:
+                # module4 not installed — пропускаем
+                pass
+
             return note_file
         except Exception as e:
             print(f"❌ Ошибка сохранения: {e}")

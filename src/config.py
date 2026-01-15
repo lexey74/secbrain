@@ -27,6 +27,9 @@ DEFAULT_CONFIG = {
     # Limits
     'max_comments': 50,
     'max_tags': 15,
+    # RAG settings
+    'RAG_EMBEDDING_MODEL': 'all-MiniLM-L6-v2',
+    'RAG_SEARCH_TOP_K': 5,
 }
 
 
