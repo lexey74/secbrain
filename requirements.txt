@@ -21,3 +21,9 @@ chromadb>=0.3.27
 sentence-transformers>=2.2.2
 langchain-text-splitters>=0.3.0
 
+# MCP / Server
+fastapi>=0.95.0
+uvicorn>=0.22.0
+mcp[sse]>=0.1.0
+python-multipart>=0.0.6
+

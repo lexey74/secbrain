@@ -79,6 +79,11 @@ class BotConfig:
     transcribe_pid: Path = Path("logs/transcribe.pid")
     ai_pid: Path = Path("logs/ai.pid")
     
+    mcp_host: str = '0.0.0.0'
+    mcp_port: int = 8000
+    public_mcp_url: str = 'http://localhost:8000'
+    auth_file: Path = Path('auth.json')
+
     @classmethod
     def from_env(cls) -> "BotConfig":
         """Загрузка конфигурации из окружения"""
@@ -102,6 +107,10 @@ class BotConfig:
             allowed_users=allowed_users,
             whisper_model=os.getenv("WHISPER_MODEL", "small"),
             whisper_threads=int(os.getenv("WHISPER_THREADS", "16")),
+            mcp_host=os.getenv('MCP_HOST', '0.0.0.0'),
+            mcp_port=int(os.getenv('MCP_PORT', '8000')),
+            public_mcp_url=os.getenv('PUBLIC_MCP_URL', 'http://localhost:8000'),
+            auth_file=Path(os.getenv('AUTH_FILE', 'auth.json')),
         )
         
         # Создаём папку для логов
@@ -120,8 +129,10 @@ class ProcessQueue:
     def __init__(self):
         self.transcribe_queue: list = []  # [(user_id, username, timestamp)]
         self.ai_queue: list = []  # [(user_id, username, timestamp)]
+        self.rag_queue: list = []  # [(user_id, username, timestamp)]
         self.transcribe_running: Optional[tuple] = None  # (user_id, username, pid)
         self.ai_running: Optional[tuple] = None  # (user_id, username, pid)
+        self.rag_running: Optional[tuple] = None  # (user_id, username, pid)
     
     def add_to_transcribe_queue(self, user_id: int, username: str) -> int:
         """Добавляет пользователя в очередь транскрибации. Возвращает позицию в очереди."""
@@ -142,6 +153,15 @@ class ProcessQueue:
         
         self.ai_queue.append((user_id, username, datetime.now()))
         return len(self.ai_queue)
+
+    def add_to_rag_queue(self, user_id: int, username: str) -> int:
+        """Добавляет пользователя в очередь RAG (semantic search)."""
+        for item in self.rag_queue:
+            if item[0] == user_id:
+                return self.rag_queue.index(item) + 1
+
+        self.rag_queue.append((user_id, username, datetime.now()))
+        return len(self.rag_queue)
     
     def start_transcribe(self, user_id: int, username: str, pid: int):
         """Помечает процесс транскрибации как запущенный"""
@@ -154,6 +174,11 @@ class ProcessQueue:
         self.ai_running = (user_id, username, pid)
         # Удаляем из очереди
         self.ai_queue = [item for item in self.ai_queue if item[0] != user_id]
+
+    def start_rag(self, user_id: int, username: str, pid: int):
+        """Помечает процесс RAG как запущенный"""
+        self.rag_running = (user_id, username, pid)
+        self.rag_queue = [item for item in self.rag_queue if item[0] != user_id]
     
     def finish_transcribe(self):
         """Завершает процесс транскрибации"""
@@ -162,6 +187,10 @@ class ProcessQueue:
     def finish_ai(self):
         """Завершает процесс AI анализа"""
         self.ai_running = None
+
+    def finish_rag(self):
+        """Завершает процесс RAG"""
+        self.rag_running = None
     
     def get_transcribe_status(self, user_id: int) -> dict:
         """Получает статус пользователя в очереди транскрибации"""
@@ -204,6 +233,25 @@ class ProcessQueue:
                 }
         
         return {'status': 'not_in_queue'}
+
+    def get_rag_status(self, user_id: int) -> dict:
+        """Получает статус пользователя в очереди RAG"""
+        if self.rag_running and self.rag_running[0] == user_id:
+            return {
+                'status': 'running',
+                'position': 0,
+                'pid': self.rag_running[2]
+            }
+
+        for i, item in enumerate(self.rag_queue):
+            if item[0] == user_id:
+                return {
+                    'status': 'queued',
+                    'position': i + 1,
+                    'total': len(self.rag_queue)
+                }
+
+        return {'status': 'not_in_queue'}
     
     def can_start_transcribe(self) -> bool:
         """Проверяет, можно ли запустить транскрибацию"""
@@ -212,6 +260,10 @@ class ProcessQueue:
     def can_start_ai(self) -> bool:
         """Проверяет, можно ли запустить AI анализ"""
         return self.ai_running is None and len(self.ai_queue) > 0
+
+    def can_start_rag(self) -> bool:
+        """Проверяет, можно ли запустить RAG задачу"""
+        return self.rag_running is None and len(self.rag_queue) > 0
 
 
 # ============================================================================
@@ -448,7 +500,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📋 **Команды:**
 /start - Это сообщение
 /help - Подробная справка
-/status - Статус системы
 /check - Проверить состояние твоих папок
 /transcribe - Транскрибировать последнее видео
 /url - Скачать по ссылке
@@ -491,6 +542,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /ai - Запустить AI анализ и тегирование
 /check - Проверить статус обработки
 /get - Получить файлы из папки
+/show - Отправить файлы последней сохранённой папки (доступно только после успешного именования)
 
 **📊 Процесс:**
 1. Создаётся папка в downloads/
@@ -502,26 +554,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /status"""
-    config = context.bot_data.get('config', BotConfig())
-    
-    # Подсчёт папок в downloads
-    downloads_count = 0
-    if config.downloads_dir.exists():
-        downloads_count = len([d for d in config.downloads_dir.iterdir() if d.is_dir()])
-    
-    status_text = f"""
-📊 **Статус SecBrain Bot**
-
-📁 Папок в downloads: {downloads_count}
-🎤 Whisper модель: {config.whisper_model}
-⚙️ Потоков CPU: {config.whisper_threads}
-
-✅ Бот работает
-"""
-    await update.message.reply_text(status_text, parse_mode='Markdown')
 
 
 async def transcribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -825,8 +857,12 @@ async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def tags_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /tags - просмотр всех тегов в системе"""
     try:
-        # Создаём TagManager
-        tag_manager = TagManager()
+        # Создаём TagManager для конкретного пользователя (папка пользователя)
+        config: BotConfig = context.bot_data.get('config', BotConfig())
+        user = update.effective_user
+        user_folder = get_user_folder(user, config.downloads_dir)
+        tags_file = user_folder / 'known_tags.json'
+        tag_manager = TagManager(tags_file)
         
         # Получаем все теги
         all_tags = tag_manager.get_all_tags()
@@ -1240,10 +1276,143 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"Используйте /check для просмотра прогресса",
             parse_mode='Markdown'
         )
+        # Запускаем таск, который будет следить за логом и оповещать чат о новых тегах
+        async def tail_ai_log(log_path: Path, pid_file: Path, chat_id: int, bot_obj):
+            import re
+            last_pos = 0
+            # Ждём появления файла
+            while not log_path.exists():
+                await asyncio.sleep(0.5)
+
+            try:
+                while True:
+                    try:
+                        with open(log_path, 'r', encoding='utf-8') as lf:
+                            lf.seek(last_pos)
+                            new = lf.read()
+                            if new:
+                                lines = new.splitlines()
+                                for line in lines:
+                                    m = re.search(r"Добавлено новых тегов:\s*(\d+)", line)
+                                    if m:
+                                        cnt = int(m.group(1))
+                                        # Отправляем сообщение в чат
+                                        try:
+                                            await bot_obj.send_message(
+                                                chat_id=chat_id,
+                                                text=f"✨ Добавлено новых тегов: {cnt}"
+                                            )
+                                        except Exception:
+                                            logger.exception("Failed to send tag notification")
+                            last_pos = lf.tell()
+                    except Exception:
+                        logger.exception("Error reading AI log")
+
+                    # Если PID-файл удалён, процесс, вероятно, завершился — выходим
+                    if not pid_file.exists():
+                        break
+
+                    await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                return
+
+        # Запустим таск наблюдения за логом (фоновой)
+        try:
+            chat_id = update.effective_chat.id
+            asyncio.create_task(tail_ai_log(Path(config.ai_log), config.ai_pid, chat_id, context.bot))
+        except Exception:
+            logger.exception("Failed to start log tail task")
         
     except Exception as e:
         logger.error(f"AI processing start error: {e}", exc_info=True)
         await status_msg.edit_text(f"❌ Ошибка запуска: {str(e)[:200]}")
+
+
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /ask - semantic search over user's knowledge base (RAG)."""
+    config: BotConfig = context.bot_data.get('config', BotConfig())
+    queue: ProcessQueue = context.bot_data.get('process_queue', ProcessQueue())
+
+    # Extract query text
+    query_text = None
+    if context.args:
+        query_text = " ".join(context.args).strip()
+    else:
+        # Try raw message (if user typed '/ask something')
+        if update.message and update.message.text:
+            parts = update.message.text.split(' ', 1)
+            if len(parts) > 1:
+                query_text = parts[1].strip()
+
+    if not query_text:
+        await update.message.reply_text("Использование: /ask <вопрос>")
+        return
+
+    user = update.effective_user
+    username = user.username or str(user.id)
+    position = queue.add_to_rag_queue(user.id, username)
+
+    await update.message.reply_text(f"🔎 Ваш запрос поставлен в очередь (позиция {position}).")
+
+    # If first in RAG queue and no ongoing transcribe/ai, process immediately
+    if position == 1 and queue.rag_running is None and queue.transcribe_running is None:
+        await update.message.reply_text("🔎 Начинаю поиск по вашей базе знаний...")
+        # prepare user folder
+        user_folder = get_user_folder(user, config.downloads_dir)
+
+        try:
+            from src.modules.module4_rag import RAGEngine
+        except Exception as e:
+            await update.message.reply_text(f"❌ RAG недоступен: {e}")
+            # remove from rag queue
+            queue.rag_queue = [item for item in queue.rag_queue if item[0] != user.id]
+            return
+
+        rag = RAGEngine(user_folder)
+
+        loop = asyncio.get_event_loop()
+
+        def run_query():
+            try:
+                return rag.query(query_text)
+            except Exception as e:
+                return {'answer': f'Ошибка выполнения RAG: {e}', 'sources': [], 'chunks': []}
+
+        result = await loop.run_in_executor(None, run_query)
+
+        # Format and send result
+        answer = result.get('answer', '')
+        sources = result.get('sources', [])
+
+        msg = f"📘 Ответ:\n{answer}\n\n" + ("Источники: " + ", ".join(sources) if sources else "Источники: нет данных")
+
+        await update.message.reply_text(msg)
+
+    # remove from rag queue
+    queue.rag_queue = [item for item in queue.rag_queue if item[0] != user.id]
+
+
+async def mcp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /mcp - issues or returns an API key for MCP access."""
+    config: BotConfig = context.bot_data.get('config', BotConfig())
+    user = update.effective_user
+    user_id = user.id
+
+    # ensure auth file exists and check for existing key
+    from src.modules.mcp_auth import get_key_for_user, create_key_for_user
+
+    existing = get_key_for_user(user_id, path=config.auth_file)
+    if existing:
+        token = existing
+    else:
+        token = create_key_for_user(user_id, path=config.auth_file)
+
+    url = f"{config.public_mcp_url.rstrip('/')}" + f"/sse?api_key={token}"
+
+    await update.message.reply_text(
+        f"Ваш MCP API ключ:\n`{token}`\n\nПодключение (SSE):\n`{url}`",
+        parse_mode='Markdown'
+    )
 
 
 # ============================================================================
@@ -1330,17 +1499,17 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         files_list = [f.name for f in output_dir.iterdir() if f.is_file()]
         
         success_text = f"""
-✅ **Контент скачан!**
+        ✅ **Контент скачан!**
 
-📁 Файлы:
-{chr(10).join('• ' + f for f in files_list[:10])}
-{'...' if len(files_list) > 10 else ''}
+        📁 Файлы:
+        {chr(10).join('• ' + f for f in files_list[:10])}
+        {'...' if len(files_list) > 10 else ''}
 
-📝 **Как озаглавим эту информацию?**
-Отправьте название (или /skip для автоматического, /show для загрузки скачанной информации)
-"""
+        📝 **Как озаглавим эту информацию?**
+        Отправьте название (или /skip для создания автоматического названия)
+        """
         await status_msg.edit_text(success_text, parse_mode='Markdown')
-        
+
         return WAITING_TITLE
         
     except Exception as e:
@@ -1410,21 +1579,18 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             'media_type': media_type,
         }
         
-        # Если это видео, предлагаем транскрибировать
+        # Если это видео, попросим описать материал (название/описание)
         if media_type == "video":
-            keyboard = [
-                [
-                    InlineKeyboardButton("🎤 Транскрибировать", callback_data="transcribe"),
-                    InlineKeyboardButton("⏭ Пропустить", callback_data="skip_transcribe"),
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
             await status_msg.edit_text(
                 f"✅ Файл сохранён!\n\n"
                 f"📂 Папка: `{folder_name}`\n\n"
-                f"Транскрибировать видео?",
-                reply_markup=reply_markup,
+                f"📝 **О чем этот материал?**\n\n"
+                f"Опиши содержание в нескольких словах - это поможет организовать контент.\n\n"
+                f"💡 Примеры:\n"
+                f"• Лекция о нейросетях\n"
+                f"• Рецепт пасты карбонара\n"
+                f"• Заметки с митинга\n\n"
+                f"Или отправь /skip чтобы пропустить",
                 parse_mode='Markdown'
             )
         else:
@@ -1657,7 +1823,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await update.message.reply_text(
         f"📝 Заметка сохранена!\n\n"
         f"**Как озаглавим эту информацию?**\n"
-        f"Отправьте название (или /skip для автоматического, /show для просмотра)"
+        f"Отправьте название (или /skip для автоматического)"
     )
     
     return WAITING_TITLE
@@ -1696,14 +1862,18 @@ async def handle_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         
         # Переименовываем папку
         temp_dir.rename(new_dir)
-        
-        # Очищаем контекст
+
+        # Сохраняем путь к последней сохранённой папке (показывается через /show)
+        context.user_data['last_saved_folder'] = str(new_dir)
+
+        # Очищаем временный контекст (но оставляем last_saved_folder)
         context.user_data.pop('temp_folder', None)
         context.user_data.pop('content_type', None)
-        
+
         await update.message.reply_text(
             f"✅ **Готово!**\n\n"
-            f"📂 Папка: `{new_folder_name}`",
+            f"📂 Папка: `{new_folder_name}`\n\n"
+            f"Для отправки сохранённого материала в эту переписку используйте команду /show",
             parse_mode='Markdown'
         )
         
@@ -1745,7 +1915,7 @@ async def show_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             await update.message.reply_text(
                 "📄 В этой папке нет медиа-файлов для предпросмотра.\n\n"
                 "📝 Как озаглавим эту информацию?\n"
-                "Отправьте название (или /skip для автоматического, /show для просмотра)"
+                "Отправьте название (или /skip для автоматического)"
             )
             return WAITING_TITLE
         
@@ -1784,7 +1954,7 @@ async def show_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
         await update.message.reply_text(
             "📝 Как озаглавим эту информацию?\n"
-            "Отправьте название (или /skip для автоматического, /show для повторного просмотра)"
+            "Отправьте название (или /skip для автоматического)"
         )
         
     except Exception as e:
@@ -1792,6 +1962,63 @@ async def show_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(f"❌ Ошибка: {str(e)[:200]}")
     
     return WAITING_TITLE
+
+
+async def show_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /show — отправляет файлы только из последней успешно сохранённой папки"""
+    user = update.effective_user
+
+    last_folder = context.user_data.get('last_saved_folder')
+    if not last_folder:
+        await update.message.reply_text("ℹ️ Нет недавно сохранённой папки для отображения.")
+        return
+
+    temp_dir = Path(last_folder)
+    if not temp_dir.exists() or not temp_dir.is_dir():
+        await update.message.reply_text("❌ Папка не найдена или уже удалена.")
+        return
+
+    try:
+        # Находим медиа файлы
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm'}
+        audio_extensions = {'.mp3', '.wav', '.ogg', '.m4a'}
+
+        media_files = []
+        for file in temp_dir.iterdir():
+            if file.is_file() and not file.name.startswith('.'):
+                ext = file.suffix.lower()
+                if ext in image_extensions or ext in video_extensions or ext in audio_extensions:
+                    media_files.append(file)
+
+        if not media_files:
+            await update.message.reply_text("📄 В папке нет медиа-файлов для отправки.")
+            return
+
+        await update.message.reply_text(f"📤 Отправляю {len(media_files)} файл(ов) из `{temp_dir.name}`...", parse_mode='Markdown')
+
+        for file in media_files[:10]:
+            try:
+                ext = file.suffix.lower()
+                if ext in image_extensions:
+                    with open(file, 'rb') as f:
+                        await update.message.reply_photo(photo=f, caption=f"🖼️ {file.name}")
+                elif ext in video_extensions:
+                    with open(file, 'rb') as f:
+                        await update.message.reply_video(video=f, caption=f"🎬 {file.name}")
+                elif ext in audio_extensions:
+                    with open(file, 'rb') as f:
+                        await update.message.reply_audio(audio=f, caption=f"🎵 {file.name}")
+            except Exception as e:
+                logger.error(f"Error sending file {file.name}: {e}")
+                await update.message.reply_text(f"⚠️ Не удалось отправить {file.name}")
+
+        if len(media_files) > 10:
+            await update.message.reply_text(f"ℹ️ Показано первые 10 из {len(media_files)} файлов")
+
+    except Exception as e:
+        logger.error(f"Error in /show: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:200]}")
 
 
 async def skip_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1876,6 +2103,20 @@ def main():
     # Сохраняем конфигурацию и инициализируем очередь
     application.bot_data['config'] = config
     application.bot_data['process_queue'] = ProcessQueue()
+
+    # Start MCP server in background (uvicorn) if possible
+    try:
+        import threading, uvicorn
+
+        def _run_mcp():
+            # uvicorn.run accepts app import string or ASGI app
+            uvicorn.run("server_mcp:app", host=config.mcp_host, port=int(config.mcp_port), log_level="info")
+
+        t = threading.Thread(target=_run_mcp, daemon=True)
+        t.start()
+        print(f"✅ MCP server started at {config.public_mcp_url}/sse")
+    except Exception as e:
+        print(f"⚠️  Не удалось запустить MCP сервер в фоне: {e}")
     
     # ConversationHandler для медиа с описанием
     media_conv_handler = ConversationHandler(
@@ -1914,11 +2155,13 @@ def main():
     # Регистрируем обработчики
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("check", check_command))
     application.add_handler(CommandHandler("transcribe", transcribe_command))
     application.add_handler(CommandHandler("url", url_command))
+    application.add_handler(CommandHandler("show", show_command))
     application.add_handler(CommandHandler("ai", ai_command))
+    application.add_handler(CommandHandler("ask", ask_command))
+    application.add_handler(CommandHandler("mcp", mcp_command))
     application.add_handler(CommandHandler("tags", tags_command))
     application.add_handler(CommandHandler("get", get_command))
     application.add_handler(CommandHandler("user", user_command))
