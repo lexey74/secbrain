@@ -1,0 +1,15 @@
+[Unit]
+Description=SecBrain Telegram Bot (webhook mode)
+After=network.target
+
+[Service]
+Type=simple
+User=lexey
+WorkingDirectory=/home/lexey/projects/secbrain
+EnvironmentFile=/home/lexey/projects/secbrain/.env
+ExecStart=/home/lexey/projects/secbrain/venv/bin/python telegram_bot.py
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

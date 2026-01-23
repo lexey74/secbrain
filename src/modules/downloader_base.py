@@ -192,6 +192,19 @@ class BaseDownloader(ABC):
             DownloadResult или None при ошибке
         """
         pass
+
+    def download_comments_only(self, url: str, folder_path: Path) -> Optional[Path]:
+        """
+        Скачивает только комментарии (если поддерживается)
+        
+        Args:
+            url: URL контента
+            folder_path: Папка для сохранения
+            
+        Returns:
+            Путь к файлу комментариев или None
+        """
+        return None
     
     def create_folder(self, prefix: str, content_id: str, title: str) -> Path:
         """

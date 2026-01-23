@@ -1,13 +1,11 @@
 """
-Instagram Reels Downloader
+Instagram Reels Downloader (HikerAPI)
 
-Скачивает Instagram Reels (вертикальные видео).
+Скачивает Instagram Reels через HikerAPI SaaS.
 """
-import json
-import subprocess
-import sys
+import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .downloader_base import (
     BaseDownloader,
@@ -23,30 +21,29 @@ from .downloader_utils import (
     format_duration,
     format_count
 )
+from .hikerapi_client import HikerAPIClient, MediaInfo
 
-
-def get_gallery_dl_command():
-    """Возвращает правильную команду gallery-dl"""
-    venv_path = Path(sys.prefix)
-    gallery_dl_venv = venv_path / 'bin' / 'gallery-dl'
-    
-    if gallery_dl_venv.exists():
-        return str(gallery_dl_venv)
-    
-    return 'gallery-dl'
+logger = logging.getLogger(__name__)
 
 
 class InstagramReelsDownloader(BaseDownloader):
     """
-    Скачивает Instagram Reels
+    Скачивает Instagram Reels через HikerAPI
     
-    Поддерживает:
-    - Reels с музыкой
-    - Reels с оригинальным аудио
+    Требует:
+    - HIKERAPI_TOKEN в переменных окружения
     """
     
     def __init__(self, settings: DownloadSettings):
         super().__init__(settings)
+        self._client: Optional[HikerAPIClient] = None
+    
+    @property
+    def client(self) -> HikerAPIClient:
+        """Ленивая инициализация клиента"""
+        if self._client is None:
+            self._client = HikerAPIClient()
+        return self._client
     
     def can_handle(self, url: str) -> bool:
         """Проверяет, может ли обработать URL"""
@@ -71,14 +68,15 @@ class InstagramReelsDownloader(BaseDownloader):
         if not shortcode:
             raise ValueError(f"Не удалось извлечь shortcode из URL: {url}")
         
-        # Получаем метаданные
-        metadata = self._get_metadata(url)
+        # Получаем метаданные через HikerAPI
+        media_info = self.client.get_media_by_shortcode(shortcode)
+        if not media_info:
+            raise ValueError(f"Не удалось получить информацию о Reels: {shortcode}")
         
         # Создаем папку
-        author = metadata.get('author', 'unknown')
-        title = self._extract_title(metadata)
+        title = self._extract_title(media_info)
         folder_path = self.create_folder(
-            prefix=f"instagram_reels_{author}",
+            prefix=f"instagram_reels_{media_info.author_username}",
             content_id=shortcode,
             title=title
         )
@@ -86,20 +84,20 @@ class InstagramReelsDownloader(BaseDownloader):
         print_progress(f"📁 Папка: {folder_path}", "")
         
         # Скачиваем видео
-        video_path = self._download_video(url, folder_path)
+        video_path = self._download_video(media_info, folder_path)
         print_progress(f"✅ Видео скачано: {video_path.name}", "")
         
         # Сохраняем описание
         description_file = self.save_description(
             folder_path=folder_path,
-            description=self._format_description(metadata)
+            description=self._format_description(media_info)
         )
         
         # Скачиваем комментарии если нужно
         comments_file = None
         if self.settings.download_comments:
             print_progress("💬 Скачивание комментариев...", "")
-            comments = self._download_comments(shortcode)
+            comments = self._download_comments(media_info.media_id)
             if comments:
                 comments_file = self.save_comments(folder_path, comments)
                 print_progress(f"✅ Комментариев: {len(comments)}", "")
@@ -113,139 +111,102 @@ class InstagramReelsDownloader(BaseDownloader):
             media_files=[video_path],
             description_file=description_file,
             comments_file=comments_file,
-            author=author,
-            likes=metadata.get('likes', 0),
-            comments_count=metadata.get('comments', 0),
-            views=metadata.get('views', 0),
-            duration=metadata.get('duration', 0)
+            author=media_info.author_username,
+            likes=media_info.like_count,
+            comments_count=media_info.comment_count,
+            views=media_info.view_count,
+            duration=int(media_info.duration)
         )
     
-    def _get_metadata(self, url: str) -> Dict:
-        """
-        Получает метаданные Reels через gallery-dl
-        
-        Args:
-            url: URL reels
+    def download_comments_only(self, url: str, folder_path: Path) -> Optional[Path]:
+        """Скачивает только комментарии"""
+        shortcode = extract_shortcode_instagram(url)
+        if not shortcode:
+            return None
             
-        Returns:
-            Словарь с метаданными
-        """
-        try:
-            cmd = [
-                get_gallery_dl_command(),
-                '--dump-json',
-                '--no-download',
-            ]
+        # Получаем media_id
+        media_info = self.client.get_media_by_shortcode(shortcode)
+        if not media_info:
+            return None
             
-            # Добавляем cookies
-            if self.settings.instagram_cookies and self.settings.instagram_cookies.exists():
-                cmd.extend(['--cookies', str(self.settings.instagram_cookies)])
-            
-            cmd.append(url)
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Парсим JSON array от gallery-dl
-            # Формат: [[code, metadata], [code, url, metadata], ...]
-            data = json.loads(result.stdout)
-            
-            # Ищем первый dict с reel метаданными
-            metadata = None
-            for item in data:
-                if isinstance(item, list) and len(item) >= 2:
-                    if isinstance(item[1], dict) and ('post_id' in item[1] or 'username' in item[1]):
-                        metadata = item[1]
-                        break
-            
-            if not metadata:
-                raise ValueError("Не удалось найти метаданные в ответе gallery-dl")
-            
-            return {
-                'author': metadata.get('username', 'unknown'),
-                'title': metadata.get('description', ''),
-                'likes': metadata.get('likes', 0),
-                'comments': metadata.get('comments', 0),
-                'views': metadata.get('video_view_count', 0),
-                'duration': metadata.get('video_duration', 0),
-                'date': metadata.get('date'),
-            }
-            
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Ошибка gallery-dl: {e.stderr}")
-        except json.JSONDecodeError as e:
-            raise Exception(f"Ошибка парсинга JSON: {e}")
+        print_progress("💬 Скачивание комментариев...", "")
+        comments = self._download_comments(media_info.media_id)
+        if comments:
+            comments_file = self.save_comments(folder_path, comments)
+            print_progress(f"✅ Комментариев: {len(comments)}", "")
+            return comments_file
+        return None
     
-    def _download_video(self, url: str, folder_path: Path) -> Path:
+    def _download_video(self, media_info: MediaInfo, folder_path: Path) -> Path:
         """
         Скачивает видео Reels
         
         Args:
-            url: URL reels
+            media_info: Информация о медиа
             folder_path: Папка для сохранения
             
         Returns:
             Путь к видео файлу
         """
-        try:
-            cmd = [
-                get_gallery_dl_command(),
-                '--directory', str(folder_path),
-                '--filename', 'reel.{extension}',
-            ]
-            
-            # Добавляем cookies
-            if self.settings.instagram_cookies and self.settings.instagram_cookies.exists():
-                cmd.extend(['--cookies', str(self.settings.instagram_cookies)])
-            
-            cmd.append(url)
-            
-            # Выполняем
-            subprocess.run(cmd, check=True, capture_output=True)
-            
-            # Ищем видео файл
-            video_files = list(folder_path.glob("reel.mp4"))
-            if not video_files:
-                raise Exception("Видео файл не найден")
-            
-            return video_files[0]
-            
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"Ошибка скачивания: {e.stderr.decode()}")
+        if not media_info.video_url:
+            raise ValueError("URL видео не найден в метаданных")
+        
+        video_path = folder_path / "reel.mp4"
+        
+        success = self.client.download_media(media_info.video_url, video_path)
+        if not success:
+            raise Exception("Не удалось скачать видео")
+        
+        return video_path
     
-    def _download_comments(self, shortcode: str) -> List[Dict]:
+    def _download_comments(self, media_id: str) -> List[Dict]:
         """
-        Скачивает комментарии к Reels
+        Скачивает комментарии к Reels через HikerAPI
         
         Args:
-            shortcode: Shortcode reels
+            media_id: ID медиа
             
         Returns:
             Список комментариев
         """
-        # TODO: Реализовать через API или scraping
-        return []
+        try:
+            raw_comments = self.client.get_media_comments(
+                media_id, 
+                count=self.settings.max_comments
+            )
+            
+            # Преобразуем в формат для save_comments
+            comments = []
+            for c in raw_comments:
+                user = c.get("user", {})
+                comments.append({
+                    "author": user.get("username", "unknown"),
+                    "text": c.get("text", ""),
+                    "likes": c.get("comment_like_count", 0),
+                    "date": c.get("created_at_utc", ""),
+                })
+            
+            return comments
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить комментарии: {e}")
+            return []
     
-    def _extract_title(self, metadata: Dict) -> str:
+    def _extract_title(self, media_info: MediaInfo) -> str:
         """Извлекает заголовок из описания"""
-        description = metadata.get('title', '')
-        if not description:
-            return 'no_title'
+        caption = media_info.caption or ""
+        if not caption:
+            return "no_title"
         
         # Берем первые 50 символов
-        title = description[:50]
+        title = caption[:50]
         return clean_filename(title)
     
-    def _format_description(self, metadata: Dict) -> str:
+    def _format_description(self, media_info: MediaInfo) -> str:
         """
         Форматирует описание в Markdown
         
         Args:
-            metadata: Метаданные
+            media_info: Информация о медиа
             
         Returns:
             Markdown текст
@@ -253,19 +214,18 @@ class InstagramReelsDownloader(BaseDownloader):
         lines = [
             f"# Instagram Reels",
             f"",
-            f"**Автор:** @{metadata.get('author', 'unknown')}",
-            f"**Дата:** {metadata.get('date', 'unknown')}",
-            f"**Длительность:** {format_duration(metadata.get('duration', 0))}",
+            f"**Автор:** @{media_info.author_username}",
+            f"**Длительность:** {format_duration(int(media_info.duration))}",
             f"",
             f"## Статистика",
             f"",
-            f"- 👁️ Просмотры: {format_count(metadata.get('views', 0))}",
-            f"- ❤️ Лайки: {format_count(metadata.get('likes', 0))}",
-            f"- 💬 Комментарии: {format_count(metadata.get('comments', 0))}",
+            f"- 👁️ Просмотры: {format_count(media_info.view_count)}",
+            f"- ❤️ Лайки: {format_count(media_info.like_count)}",
+            f"- 💬 Комментарии: {format_count(media_info.comment_count)}",
             f"",
             f"## Описание",
             f"",
-            metadata.get('title', 'Без описания'),
+            media_info.caption or "Без описания",
         ]
         
         return '\n'.join(lines)

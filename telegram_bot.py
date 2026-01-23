@@ -25,6 +25,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
 
 try:
     import psutil
@@ -87,20 +88,17 @@ class BotConfig:
     @classmethod
     def from_env(cls) -> "BotConfig":
         """Загрузка конфигурации из окружения"""
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        
-        # Попробуем загрузить из .env файла
+        # Prefer real environment variables, but also load a .env file if
+        # present to simplify local development. python-dotenv is used here
+        # to avoid rolling our own parser.
         env_file = Path(__file__).parent / ".env"
-        if env_file.exists() and not token:
-            with open(env_file) as f:
-                for line in f:
-                    if line.startswith("TELEGRAM_BOT_TOKEN="):
-                        token = line.split("=", 1)[1].strip().strip('"\'')
-                        break
-        
-        allowed_users_str = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+        if env_file.exists():
+            load_dotenv(dotenv_path=env_file)
+
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        allowed_users_str = os.getenv("TELEGRAM_ALLOWED_USERS", "") or ""
         allowed_users = [int(u) for u in allowed_users_str.split(",") if u.strip()]
-        
+
         config = cls(
             token=token,
             downloads_dir=Path(os.getenv("DOWNLOADS_DIR", "downloads")),
@@ -272,6 +270,7 @@ class ProcessQueue:
 
 WAITING_DESCRIPTION = 1
 WAITING_TITLE = 2
+WAITING_COMMENTS_CONFIRMATION = 3
 
 
 # ============================================================================
@@ -521,36 +520,47 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /help"""
     help_text = """
-📖 **Подробная справка**
+📖 **Полное руководство SecBrain**
 
-**🔗 URL (YouTube/Instagram):**
-• Обычные видео: youtube.com/watch?v=...
-• Shorts: youtube.com/shorts/...
-• Короткие ссылки: youtu.be/...
-• Instagram: instagram.com/p/... или /reel/...
+**📥 1. Загрузка контента:**
+Просто отправьте ссылку или файл.
 
-**📸 Медиа файлы:**
-• Фото: JPG, PNG, WEBP
-• Видео: MP4, MOV, AVI
-• После отправки попрошу описание
+• **YouTube:**
+  - Видео (`watch?v=...`, `youtu.be/...`)
+  - Shorts (`shorts/...`)
+  - Комментарии (предложу скачать после видео)
+  - _Скачаются: видео (best), описание, субтитры_
 
-**📝 Текст:**
-• Любой текст (не URL) сохраняется как заметка
+• **Instagram:**
+  - Posts (`p/...`) - Фото/Карусели/Видео
+  - Reels (`reel/...`) - Видео
+  - Комментарии (предложу скачать после поста)
+  - _Скачаются: медиа файлы, описание, метаданные_
 
-**⚙️ Команды обработки:**
-/transcribe - Запустить транскрибацию всех видео
-/ai - Запустить AI анализ и тегирование
-/check - Проверить статус обработки
-/get - Получить файлы из папки
-/show - Отправить файлы последней сохранённой папки (доступно только после успешного именования)
+• **Файлы и текст:**
+  - Отправьте фото/видео/документ → сохраню в личную папку
+  - Отправьте текст → сохраню как заметку
 
-**📊 Процесс:**
-1. Создаётся папка в downloads/
-2. Сохраняется контент
-3. /transcribe → transcript.md (Whisper)
-4. /ai → Knowledge.md + теги (Ollama)
+**🧠 2. Обработка и AI:**
+Команды для работы с вашей базой знаний:
 
-⏱ Обработка выполняется в фоне, используйте /check для мониторинга.
+• `/transcribe` - Транскрибировать все видео в папке (Whisper)
+• `/ai` - Запустить AI анализ: тегирование, саммари (Ollama)
+• `/ask <вопрос>` - Умный поиск по вашей базе (RAG)
+  _Пример: /ask о чем было видео про Python?_
+
+**🔧 3. Интеграции:**
+• `/mcp` - Получить ключ для подключения IDE (Cursor/Windsurf) через MCP
+• `/check` - Проверить статус фоновых задач
+• `/show` - Показать файлы последней сохраненной папки
+• `/user` - Информация о вашем профиле
+
+**📊 Как это работает:**
+1. Вы скидываете контент → Бот сохраняет в `downloads/{user_id}/...`
+2. Бот предлагает скачать комментарии (если есть)
+3. Бот спрашивает название для папки
+4. Вы запускаете `/transcribe` или `/ai` для обогащения данных
+5. Ищете ответы через `/ask` или подключаетесь через MCP прямо из IDE
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -1495,7 +1505,35 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data['temp_folder'] = str(output_dir)
         context.user_data['content_type'] = url_type
         
-        # Формируем отчёт и запрашиваем название
+        # Проверяем наличие комментариев
+        if result.comment_count and result.comment_count > 0:
+            # Сохраняем контекст для обработки ответа
+            context.user_data['pending_comments'] = {
+                'url': url,
+                'folder_path': str(output_dir),
+                'count': result.comment_count,
+                'content_type': url_type
+            }
+            
+            # Клавиатура для вопроса
+            keyboard = [
+                [
+                    InlineKeyboardButton("Да", callback_data="download_comments_yes"),
+                    InlineKeyboardButton("Нет", callback_data="download_comments_no")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await status_msg.edit_text(
+                f"✅ **Контент скачан!**\n\n"
+                f"Найдено комментариев: **{result.comment_count}**\n"
+                f"Скачать их?",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            return WAITING_COMMENTS_CONFIRMATION
+
+        # Если комментариев нет или они 0, переходим сразу к названию
         files_list = [f.name for f in output_dir.iterdir() if f.is_file()]
         
         success_text = f"""
@@ -1521,6 +1559,95 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ============================================================================
 # Обработка медиа файлов
 # ============================================================================
+
+
+async def handle_comments_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработка подтверждения скачивания комментариев"""
+    query = update.callback_query
+    await query.answer()
+    
+    config: BotConfig = context.bot_data.get('config', BotConfig())
+    data = context.user_data.get('pending_comments', {})
+    
+    if not data:
+        await query.edit_message_text("⚠️ Данные устарели")
+        return ConversationHandler.END
+        
+    url = data['url']
+    folder_path = Path(data['folder_path'])
+    
+    if query.data == "download_comments_yes":
+        await query.edit_message_text(f"💬 Скачиваю {data['count']} комментариев...")
+        
+        try:
+            # Настройки для скачивания комментариев
+            cookies_dir = Path('cookies')
+            # Ищем cookies (копируем логику из handle_url)
+            instagram_cookies = None
+            if (cookies_dir / 'instagram_cookies.txt').exists():
+                instagram_cookies = cookies_dir / 'instagram_cookies.txt'
+            elif (cookies_dir / 'instagram.txt').exists():
+                instagram_cookies = cookies_dir / 'instagram.txt'
+            
+            youtube_cookies_files = list(cookies_dir.glob('youtube_cookies*.txt'))
+            youtube_cookies_dir = cookies_dir if youtube_cookies_files else None
+            
+            settings = DownloadSettings(
+                download_video=False,
+                download_comments=True,
+                max_comments=100,
+                instagram_cookies=instagram_cookies,
+                youtube_cookies_dir=youtube_cookies_dir
+            )
+            
+            router = ContentRouter(settings)
+            
+            # Устанавливаем output_dir
+            for downloader in router.downloaders:
+                downloader.output_dir = folder_path.parent
+                
+            # Запускаем скачивание
+            loop = asyncio.get_event_loop()
+            comments_path = await loop.run_in_executor(
+                None,
+                lambda: router.download_comments(url, folder_path)
+            )
+            
+            if comments_path:
+                await query.edit_message_text(f"✅ Комментарии скачаны!")
+            else:
+                await query.edit_message_text(f"⚠️ Не удалось скачать комментарии")
+                
+        except Exception as e:
+            logger.error(f"Error downloading comments: {e}", exc_info=True)
+            await query.edit_message_text(f"⚠️ Ошибка при скачивании комментариев: {e}")
+            
+    elif query.data == "download_comments_no":
+        await query.edit_message_text("⏩ Пропускаем комментарии")
+    
+    # Показываем финальный отчет и просим название
+    files_list = [f.name for f in folder_path.iterdir() if f.is_file()]
+    
+    success_text = f"""
+    ✅ **Контент готов!**
+
+    📁 Файлы:
+    {chr(10).join('• ' + f for f in files_list[:10])}
+    {'...' if len(files_list) > 10 else ''}
+
+    📝 **Как озаглавим эту информацию?**
+    Отправьте название (или /skip для создания автоматического названия)
+    """
+    
+    # Отправляем новое сообщение
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=success_text,
+        parse_mode='Markdown'
+    )
+    
+    return WAITING_TITLE
+
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Обработка фото/видео от пользователя"""
@@ -2072,17 +2199,17 @@ def main():
     """Запуск бота"""
     # Загружаем конфигурацию
     config = BotConfig.from_env()
-    
+
     if not config.token:
         print("❌ Ошибка: TELEGRAM_BOT_TOKEN не установлен!")
         print("\nУстановите токен одним из способов:")
         print("1. export TELEGRAM_BOT_TOKEN='your_token'")
         print("2. Создайте .env файл с TELEGRAM_BOT_TOKEN=your_token")
         sys.exit(1)
-    
+
     # Создаём папку downloads
     config.downloads_dir.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🤖 SecBrain Telegram Bot
@@ -2096,28 +2223,28 @@ def main():
 🚀 Бот запущен! Нажмите Ctrl+C для остановки.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """)
-    
+
     # Создаём приложение
     application = Application.builder().token(config.token).build()
-    
+
     # Сохраняем конфигурацию и инициализируем очередь
     application.bot_data['config'] = config
     application.bot_data['process_queue'] = ProcessQueue()
 
-    # Start MCP server in background (uvicorn) if possible
-    try:
-        import threading, uvicorn
+    # MCP server is no longer started automatically by the bot. Run it
+    # separately in production or development to keep process control
+    # explicit. Example command (run in project root):
+    #
+    #   uvicorn server_mcp:app --host <HOST> --port <PORT> --reload
+    #
+    # The bot will still read PUBLIC_MCP_URL from environment/.env and
+    # report it in the /mcp command.
+    print(
+        f"ℹ️ MCP server is not started automatically. Start it manually:\n"
+        f"    uvicorn server_mcp:app --host {config.mcp_host} --port {config.mcp_port}\n"
+        f"Public SSE URL: {config.public_mcp_url.rstrip('/')}/sse"
+    )
 
-        def _run_mcp():
-            # uvicorn.run accepts app import string or ASGI app
-            uvicorn.run("server_mcp:app", host=config.mcp_host, port=int(config.mcp_port), log_level="info")
-
-        t = threading.Thread(target=_run_mcp, daemon=True)
-        t.start()
-        print(f"✅ MCP server started at {config.public_mcp_url}/sse")
-    except Exception as e:
-        print(f"⚠️  Не удалось запустить MCP сервер в фоне: {e}")
-    
     # ConversationHandler для медиа с описанием
     media_conv_handler = ConversationHandler(
         entry_points=[
@@ -2134,13 +2261,16 @@ def main():
             CommandHandler("cancel", skip_description),
         ],
     )
-    
+
     # ConversationHandler для URL/текста с запросом названия
     content_conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
         ],
         states={
+            WAITING_COMMENTS_CONFIRMATION: [
+                CallbackQueryHandler(handle_comments_confirmation),
+            ],
             WAITING_TITLE: [
                 CommandHandler("skip", skip_title),
                 CommandHandler("show", show_files),
@@ -2151,7 +2281,7 @@ def main():
             CommandHandler("cancel", skip_title),
         ],
     )
-    
+
     # Регистрируем обработчики
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -2165,16 +2295,16 @@ def main():
     application.add_handler(CommandHandler("tags", tags_command))
     application.add_handler(CommandHandler("get", get_command))
     application.add_handler(CommandHandler("user", user_command))
-    
+
     # Обработчик callback для /get (папки и пагинация)
     application.add_handler(CallbackQueryHandler(get_folder_callback, pattern="^(get:|page:)"))
-    
+
     application.add_handler(media_conv_handler)
     application.add_handler(content_conv_handler)
-    
+
     # Обработчик неизвестных команд (должен быть последним)
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-    
+
     # Запускаем бота
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

@@ -77,6 +77,24 @@ class ContentRouter:
         
         return result
     
+    def download_comments(self, url: str, folder_path: Path) -> Optional[Path]:
+        """
+        Скачивает только комментарии для контента
+        
+        Args:
+            url: URL контента
+            folder_path: Папка для сохранения
+            
+        Returns:
+            Путь к файлу комментариев или None
+        """
+        downloader = self.detect_downloader(url)
+        if not downloader:
+            return None
+            
+        print_progress(f"🎯 Скачивание комментариев: {downloader.__class__.__name__}", "")
+        return downloader.download_comments_only(url, folder_path)
+    
     def detect_downloader(self, url: str) -> Optional[BaseDownloader]:
         """
         Определяет подходящий скачиватель для URL

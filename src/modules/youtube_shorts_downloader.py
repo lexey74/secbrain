@@ -4,7 +4,7 @@ YouTube Shorts Downloader
 Скачивает YouTube Shorts (вертикальные короткие видео).
 """
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .downloader_base import (
     BaseDownloader,
@@ -21,6 +21,7 @@ from .downloader_utils import (
     format_count
 )
 from .youtube_grabber_v2 import ProductionYouTubeGrabber, ImprovedCookieManager
+from .youtube_comment_service import YouTubeCommentService
 
 
 class YouTubeShortsDownloader(BaseDownloader):
@@ -30,6 +31,7 @@ class YouTubeShortsDownloader(BaseDownloader):
     Поддерживает:
     - Вертикальные короткие видео
     - Автоматический обход блокировок
+    - Скачивание комментариев через YouTubeCommentService
     """
     
     def __init__(self, settings: DownloadSettings):
@@ -48,6 +50,9 @@ class YouTubeShortsDownloader(BaseDownloader):
         
         # Используем тот же ProductionYouTubeGrabber
         self.grabber = ProductionYouTubeGrabber(cookie_manager=cookie_manager)
+        
+        # Инициализируем сервис комментариев
+        self.comment_service = YouTubeCommentService()
     
     def can_handle(self, url: str) -> bool:
         """Проверяет, может ли обработать URL"""
@@ -103,11 +108,7 @@ class YouTubeShortsDownloader(BaseDownloader):
         # Скачиваем комментарии если нужно
         comments_file = None
         if self.settings.download_comments:
-            print_progress("💬 Скачивание комментариев...", "")
-            comments = self._download_comments(video_id)
-            if comments:
-                comments_file = self.save_comments(folder_path, comments)
-                print_progress(f"✅ Комментариев: {len(comments)}", "")
+            comments_file = self._download_comments(video_id, url, folder_path)
         
         return YouTubeVideoResult(
             source=ContentSource.YOUTUBE,
@@ -124,25 +125,40 @@ class YouTubeShortsDownloader(BaseDownloader):
             duration=metadata.get('duration', 0)
         )
     
-    def _download_comments(self, video_id: str) -> List[Dict]:
-        """
-        Скачивает комментарии к Shorts
-        
-        Args:
-            video_id: ID видео
+    def download_comments_only(self, url: str, folder_path: Path) -> Optional[Path]:
+        """Скачивает только комментарии"""
+        video_id = extract_video_id_youtube(url)
+        if not video_id:
+            return None
             
+        return self._download_comments(video_id, url, folder_path)
+    
+    def _download_comments(self, video_id: str, url: str, folder_path: Path) -> Optional[Path]:
+        """
+        Скачивает комментарии через YouTubeCommentService
+        
         Returns:
-            Список комментариев
+            Путь к файлу комментариев или None
         """
         try:
-            comments = self.grabber.get_comments(
-                video_id=video_id,
-                max_comments=self.settings.max_comments
+            print_progress("💬 Скачивание комментариев...", "")
+            output_file = folder_path / "comments.md"
+            
+            result = self.comment_service.download_comments(
+                url=url,
+                output_file=output_file,
+                max_comments=self.settings.max_comments,
+                sort_by='popular'
             )
-            return comments
+            
+            if result['comments']:
+                print_progress(f"✅ Комментариев: {len(result['comments'])}", "")
+                return output_file
+            
+            return None
         except Exception as e:
             print_progress(f"⚠️  Комментарии недоступны: {e}", "")
-            return []
+            return None
     
     def _format_description(self, metadata: Dict) -> str:
         """

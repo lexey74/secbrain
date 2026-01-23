@@ -17,8 +17,8 @@ from datetime import datetime
 from youtube_comment_downloader import YoutubeCommentDownloader, SORT_BY_POPULAR, SORT_BY_RECENT
 
 
-class YouTubeCommentsDownloader:
-    """Скачиватель комментариев YouTube"""
+class YouTubeCommentService:
+    """Сервис для скачивания комментариев YouTube"""
     
     def __init__(self):
         """Инициализация"""
@@ -254,7 +254,7 @@ def main():
     max_comments = int(sys.argv[2]) if len(sys.argv) > 2 else None
     
     # Создаем downloader
-    downloader = YouTubeCommentsDownloader()
+    downloader = YouTubeCommentService()
     
     # Скачиваем комментарии
     output_file = Path('comments.md')

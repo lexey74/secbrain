@@ -41,7 +41,7 @@ from .instagram_post_downloader import InstagramPostDownloader
 from .instagram_reels_downloader import InstagramReelsDownloader
 from .youtube_video_downloader import YouTubeVideoDownloader
 from .youtube_shorts_downloader import YouTubeShortsDownloader
-from .comments_downloader import CommentsDownloader
+from .youtube_comment_service import YouTubeCommentService
 
 # Роутер (главный интерфейс)
 from .content_router import ContentRouter
@@ -59,7 +59,6 @@ from .content_downloader import (
     ContentInfo,
 )
 from .hybrid_grabber import HybridGrabber
-from .youtube_grabber import YouTubeGrabber, YouTubeContent
 from .local_ears import LocalEars
 from .local_brain import LocalBrain
 from .tag_manager import TagManager
@@ -94,7 +93,7 @@ __all__ = [
     'InstagramReelsDownloader',
     'YouTubeVideoDownloader',
     'YouTubeShortsDownloader',
-    'CommentsDownloader',
+    'YouTubeCommentService',
     
     # Роутер (главный интерфейс)
     'ContentRouter',
@@ -110,8 +109,6 @@ __all__ = [
     
     # Grabbers
     'HybridGrabber',
-    'YouTubeGrabber',
-    'YouTubeContent',
     
     # Processing
     'LocalEars',
