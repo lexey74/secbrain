@@ -37,15 +37,17 @@ class TagManager:
             try:
                 with open(self.tags_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    self.known_tags = set(data.get('tags', self.DEFAULT_TAGS))
+                    # Если в файле есть ключ 'tags', используем его, иначе считаем файл пустым
+                    self.known_tags = set(data.get('tags', []))
             except (json.JSONDecodeError, IOError) as e:
                 print(f"⚠️  Ошибка чтения {self.tags_file}: {e}")
-                self.known_tags = set(self.DEFAULT_TAGS)
+                # При ошибке чтения — инициализируем пустой набор тегов
+                self.known_tags = set()
         else:
-            # Создаем файл с дефолтными тегами
-            self.known_tags = set(self.DEFAULT_TAGS)
+            # Создаём пустой файл тегов (не заполняем дефолтными тегами)
+            self.known_tags = set()
             self.save_tags()
-            print(f"✅ Создан новый файл тегов: {self.tags_file}")
+            print(f"✅ Создан новый (пустой) файл тегов: {self.tags_file}")
     
     def save_tags(self) -> None:
         """Сохранение тегов в файл"""

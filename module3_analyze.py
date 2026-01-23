@@ -207,6 +207,60 @@ class AIProcessor:
             traceback.print_exc()
             return None
     
+    def _extract_summary_text(self, summary_data: Dict) -> str:
+        """
+        Извлекает текст саммари из результата LLM.
+        Обрабатывает разные форматы ответа.
+        
+        Args:
+            summary_data: Словарь с результатом анализа от LLM
+            
+        Returns:
+            Форматированный текст саммари
+        """
+        if not isinstance(summary_data, dict):
+            return str(summary_data)
+        
+        # Стандартный формат: {'summary': '...', 'category': '...', ...}
+        if 'summary' in summary_data:
+            return summary_data['summary']
+        
+        # Альтернативный формат с key_points
+        if 'key_points' in summary_data:
+            parts = []
+            if 'video_title' in summary_data:
+                parts.append(f"**{summary_data['video_title']}**\n")
+            
+            key_points = summary_data['key_points']
+            if isinstance(key_points, list):
+                parts.append('\n'.join(f"- {point}" for point in key_points))
+            else:
+                parts.append(str(key_points))
+            
+            # Добавляем дополнительную информацию если есть
+            if 'total_time' in summary_data:
+                parts.append(f"\n**Время работы:** {summary_data['total_time']}")
+            if 'cost_without_lighting' in summary_data:
+                parts.append(f"**Стоимость:** {summary_data['cost_without_lighting']}")
+            
+            return '\n'.join(parts)
+        
+        # Если ничего не подошло, форматируем как список ключ-значение
+        result_parts = []
+        for key, value in summary_data.items():
+            if key in ('tags', 'valuable_comments', 'category'):
+                continue  # Эти поля обрабатываются отдельно
+            if isinstance(value, list):
+                result_parts.append(f"**{key}:**")
+                for item in value:
+                    result_parts.append(f"- {item}")
+            elif isinstance(value, dict):
+                continue  # Пропускаем вложенные словари
+            else:
+                result_parts.append(f"**{key}:** {value}")
+        
+        return '\n'.join(result_parts) if result_parts else 'Нет саммари'
+    
     def create_obsidian_note(
         self, 
         folder: Path, 
@@ -234,6 +288,11 @@ class AIProcessor:
         # Создаем Obsidian frontmatter
         tags_str = ', '.join(analysis['tags'])
         
+        # Извлекаем данные из summary
+        summary_data = analysis['summary']
+        summary_text = self._extract_summary_text(summary_data)
+        category = summary_data.get('category', 'Не указана') if isinstance(summary_data, dict) else 'Не указана'
+        
         markdown = f"""---
 title: {title}
 date: {datetime.now().strftime('%Y-%m-%d')}
@@ -258,11 +317,11 @@ processed: true
 
 ## 📝 Саммари
 
-{analysis['summary'].get('summary', 'Нет саммари') if isinstance(analysis['summary'], dict) else str(analysis['summary'])}
+{summary_text}
 
 ## 📂 Категория
 
-{analysis['summary'].get('category', 'Не указана') if isinstance(analysis['summary'], dict) else 'Не указана'}
+{category}
 
 ## 💬 Ценные комментарии
 

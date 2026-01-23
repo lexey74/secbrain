@@ -10,6 +10,7 @@ playwright>=1.40.0
 python-dateutil>=2.8.2
 youtube-comment-downloader
 psutil>=5.9.0
+python-dotenv>=1.0.0
 
 # Testing
 pytest>=7.4.0
@@ -26,4 +27,8 @@ fastapi>=0.95.0
 uvicorn>=0.22.0
 mcp[sse]>=0.1.0
 python-multipart>=0.0.6
+
+
+# JWT support for MCP authentication
+PyJWT>=2.8.0
 

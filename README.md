@@ -40,6 +40,45 @@ ollama serve
 ollama pull llama3.2
 ```
 
+## MCP Authentication (JWT / API keys)
+
+This project exposes an MCP-compatible server at `/sse` (and transport-specific mounts) and supports authenticating clients with either API keys or short-lived JWTs.
+
+Quick start (development):
+
+- Add a JWT secret to your `.env` (optional if you only want API key validation):
+
+```
+MCP_JWT_SECRET=your_secret_here
+```
+
+- Generate an API key for a Telegram user id:
+
+```
+./venv/bin/python - <<'PY'
+from src.modules.mcp_auth import create_key_for_user
+print(create_key_for_user(1))
+PY
+```
+
+- Exchange the API key for a short-lived JWT (only works if `MCP_JWT_SECRET` is set):
+
+```
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"api_key":"<API_KEY>"}' http://localhost:8000/auth/token
+```
+
+- Use the JWT when connecting to MCP endpoints:
+
+```
+Authorization: Bearer <JWT>
+```
+
+Notes:
+- `DEFAULT_MCP_USER` is now optional. If it's not set and `MCP_DEV_MODE=false`, unauthenticated requests receive 401.
+- For development you can keep `MCP_DEV_MODE=true` to allow unauthenticated access (not for production).
+
+
 ### 3. Instagram Cookies
 
 Для работы `yt-dlp` нужны куки браузера:
