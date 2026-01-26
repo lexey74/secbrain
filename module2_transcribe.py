@@ -198,7 +198,7 @@ class TranscriptionProcessor:
         else:
             return f"{minutes:02d}:{secs:02d}"
     
-    def process_folder(self, folder: Path) -> dict:
+    def _process_content_folder(self, folder: Path) -> dict:
         """
         Обрабатывает одну папку
         
@@ -247,6 +247,62 @@ class TranscriptionProcessor:
         
         return stats
     
+    def process_folder(self, folder: Path) -> dict:
+        """
+        Обрабатывает папку (рекурсивно, если это контейнер)
+        """
+        # 1. Проверяем, является ли эта папка контент-папкой (есть медиа)
+        media_files = self.find_media_files(folder)
+        if media_files:
+            return self._process_content_folder(folder)
+            
+        # 2. Если нет медиа, проверяем подпапки (рекурсия)
+        try:
+            subfolders = [f for f in folder.iterdir() if f.is_dir()]
+        except Exception:
+            subfolders = []
+            
+        if not subfolders:
+             return {
+                'folder': folder.name,
+                'no_media': True,
+                'already_has_transcript': False,
+                'success': False,
+                'error': None
+            }
+            
+        print(f"📂 Папка {folder.name} — контейнер, проверяем {len(subfolders)} подпапок...")
+        
+        agg_stats = {
+            'folder': folder.name,
+            'processed_count': 0,
+            'success_count': 0,
+            'success': False,
+            'already_has_transcript': False,
+            'no_media': False,
+            'error': None
+        }
+        
+        for sub in subfolders:
+            if sub.name.startswith('.'): continue
+            
+            sub_stats = self.process_folder(sub)
+            
+            if sub_stats.get('success'):
+                agg_stats['success_count'] += 1
+                agg_stats['processed_count'] += 1
+            elif sub_stats.get('already_has_transcript'):
+                agg_stats['already_has_transcript'] = True
+                
+        if agg_stats['success_count'] > 0:
+            agg_stats['success'] = True
+            print(f"✅ Обработано {agg_stats['success_count']} элементов в {folder.name}")
+        else:
+            if not agg_stats['already_has_transcript']:
+                agg_stats['no_media'] = True
+                
+        return agg_stats
+
     def process_all(self) -> dict:
         """
         Обрабатывает все папки

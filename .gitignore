@@ -94,3 +94,7 @@ youtube_download_log.txt
 
 # Proxies and runtime data
 proxies.txt
+
+# User data
+users/
+bot_state/

@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 class BotConfig:
     """Конфигурация бота"""
     token: str = ""
-    downloads_dir: Path = Path("downloads")
+    users_dir: Path = Path("users")
     allowed_users: list = field(default_factory=list)  # Пустой = все разрешены
     whisper_model: str = "small"
     whisper_threads: int = 16
@@ -101,7 +101,7 @@ class BotConfig:
 
         config = cls(
             token=token,
-            downloads_dir=Path(os.getenv("DOWNLOADS_DIR", "downloads")),
+            users_dir=Path(os.getenv("USERS_DIR", "users")),
             allowed_users=allowed_users,
             whisper_model=os.getenv("WHISPER_MODEL", "small"),
             whisper_threads=int(os.getenv("WHISPER_THREADS", "16")),
@@ -375,27 +375,62 @@ async def start_ai_process(update: Update, context: ContextTypes.DEFAULT_TYPE,
         queue.finish_ai()
 
 
-def get_user_folder(user: User, base_dir: Path) -> Path:
+def get_user_folder(user: User, users_dir: Path) -> Path:
     """
-    Получает папку для конкретного пользователя
+    Получает папку downloads для конкретного пользователя
     
     Args:
         user: Telegram User объект
-        base_dir: Базовая директория (обычно downloads/)
+        users_dir: Базовая директория users/
         
     Returns:
-        Path к пользовательской папке
+        Path к папке downloads пользователя
     """
-    # Формируем имя папки из username или id
     if user.username:
         folder_name = sanitize_filename(user.username, max_length=50)
     else:
         folder_name = f"user_{user.id}"
     
-    user_folder = base_dir / folder_name
-    user_folder.mkdir(parents=True, exist_ok=True)
+    # users/{username}/downloads
+    user_download_folder = users_dir / folder_name / "downloads"
+    user_download_folder.mkdir(parents=True, exist_ok=True)
     
-    return user_folder
+    return user_download_folder
+
+
+def ensure_user_structure(user: User, users_dir: Path) -> Path:
+    """
+    Создает полную структуру папок для пользователя
+    
+    Args:
+        user: Telegram User объект
+        users_dir: Базовая директория users/
+        
+    Returns:
+        Path к корневой папке пользователя
+    """
+    if user.username:
+        folder_name = sanitize_filename(user.username, max_length=50)
+    else:
+        folder_name = f"user_{user.id}"
+    
+    user_root = users_dir / folder_name
+    
+    # Создаем структуру согласно structure.md
+    subdirs = [
+        "downloads",
+        "Context",
+        "Goals",
+        "Reviews",
+        "Projects",
+        "Meetings",
+        "achievements"
+    ]
+    
+    for subdir in subdirs:
+        (user_root / subdir).mkdir(parents=True, exist_ok=True)
+    
+    return user_root
 
 
 def sanitize_filename(name: str, max_length: int = 80) -> str:
@@ -573,7 +608,7 @@ async def transcribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = update.effective_user
     
     # Получаем пользовательскую папку
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     if not user_folder.exists() or not list(user_folder.iterdir()):
         await update.message.reply_text("📁 Ваша папка пуста")
@@ -710,7 +745,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     
     # Получаем пользовательскую папку
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     if not user_folder.exists() or not list(user_folder.iterdir()):
         await update.message.reply_text(
@@ -870,7 +905,7 @@ async def tags_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Создаём TagManager для конкретного пользователя (папка пользователя)
         config: BotConfig = context.bot_data.get('config', BotConfig())
         user = update.effective_user
-        user_folder = get_user_folder(user, config.downloads_dir)
+        user_folder = get_user_folder(user, config.users_dir)
         tags_file = user_folder / 'known_tags.json'
         tag_manager = TagManager(tags_file)
         
@@ -915,7 +950,7 @@ async def get_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user = update.effective_user
     
     # Получаем папку пользователя
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     if not user_folder.exists() or not list(user_folder.iterdir()):
         await update.message.reply_text(
@@ -1023,7 +1058,7 @@ async def get_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     config: BotConfig = context.bot_data.get('config', BotConfig())
     user = update.effective_user
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     # Извлекаем данные из callback_data
     callback_data = query.data
@@ -1236,8 +1271,8 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     """Обработчик команды /ai - запуск Модуля 3 (AI анализ и тегирование)"""
     config: BotConfig = context.bot_data.get('config', BotConfig())
     
-    if not config.downloads_dir.exists():
-        await update.message.reply_text("📁 Папка downloads пуста")
+    if not config.users_dir.exists():
+        await update.message.reply_text("📁 Папка users пуста")
         return
     
     # Проверяем, не запущен ли уже процесс
@@ -1368,7 +1403,7 @@ async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if position == 1 and queue.rag_running is None and queue.transcribe_running is None:
         await update.message.reply_text("🔎 Начинаю поиск по вашей базе знаний...")
         # prepare user folder
-        user_folder = get_user_folder(user, config.downloads_dir)
+        user_folder = get_user_folder(user, config.users_dir)
 
         try:
             from src.modules.module4_rag import RAGEngine
@@ -1440,7 +1475,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     # Получаем пользовательскую папку
     user = update.effective_user
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     # Отправляем сообщение о начале обработки
     status_msg = await update.message.reply_text(
@@ -1678,7 +1713,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     # Получаем пользовательскую папку
     user = update.effective_user
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     # Создаём папку внутри пользовательской папки
     folder_name = create_folder_name(f"telegram_{media_type}")
@@ -1929,7 +1964,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     # Получаем пользовательскую папку
     user = update.effective_user
-    user_folder = get_user_folder(user, config.downloads_dir)
+    user_folder = get_user_folder(user, config.users_dir)
     
     # Создаём временную папку для заметки (внутри пользовательской папки)
     temp_folder_name = f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -1985,7 +2020,9 @@ async def handle_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         
         # Формируем новое имя папки
         new_folder_name = f"{content_type}_{safe_title}_{timestamp}"
-        new_dir = config.downloads_dir / new_folder_name
+        # Получаем user_folder (users/{user}/downloads)
+        user_folder = get_user_folder(update.effective_user, config.users_dir)
+        new_dir = user_folder / new_folder_name
         
         # Переименовываем папку
         temp_dir.rename(new_dir)
@@ -2169,7 +2206,9 @@ async def skip_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Используем временное имя или генерируем автоматическое
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_folder_name = f"{content_type}_auto_{timestamp}"
-        new_dir = config.downloads_dir / new_folder_name
+        # Получаем user_folder (users/{user}/downloads)
+        user_folder = get_user_folder(update.effective_user, config.users_dir)
+        new_dir = user_folder / new_folder_name
         
         # Переименовываем папку
         temp_dir.rename(new_dir)
@@ -2207,15 +2246,15 @@ def main():
         print("2. Создайте .env файл с TELEGRAM_BOT_TOKEN=your_token")
         sys.exit(1)
 
-    # Создаём папку downloads
-    config.downloads_dir.mkdir(parents=True, exist_ok=True)
+    # Создаём папку users
+    config.users_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🤖 SecBrain Telegram Bot
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📁 Downloads: {config.downloads_dir}
+📁 Users Dir: {config.users_dir}
 🎤 Whisper:   {config.whisper_model} ({config.whisper_threads} потоков)
 👥 Users:     {'Все' if not config.allowed_users else config.allowed_users}
 

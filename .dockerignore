@@ -1,0 +1,17 @@
+__pycache__
+*.py[cod]
+*$py.class
+.env
+.git
+.gitignore
+.vscode
+venv/
+data/
+downloads/
+temp/
+logs/
+*.log
+session.json
+cookies.txt
+known_tags.json
+auth.json

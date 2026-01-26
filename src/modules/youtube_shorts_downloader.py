@@ -34,8 +34,8 @@ class YouTubeShortsDownloader(BaseDownloader):
     - Скачивание комментариев через YouTubeCommentService
     """
     
-    def __init__(self, settings: DownloadSettings):
-        super().__init__(settings)
+    def __init__(self, settings: DownloadSettings, output_dir: Path = None):
+        super().__init__(settings, output_dir)
         
         # Создаем cookie manager
         cookie_manager = None

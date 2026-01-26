@@ -34,8 +34,8 @@ class InstagramReelsDownloader(BaseDownloader):
     - HIKERAPI_TOKEN в переменных окружения
     """
     
-    def __init__(self, settings: DownloadSettings):
-        super().__init__(settings)
+    def __init__(self, settings: DownloadSettings, output_dir: Path = None):
+        super().__init__(settings, output_dir)
         self._client: Optional[HikerAPIClient] = None
     
     @property

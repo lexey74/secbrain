@@ -12,7 +12,11 @@
 - 🤖 **AI-Powered**: Локальный AI анализ, суммаризация, категоризация
 - ⚡ **Manual Control**: Каждый модуль запускается вручную по необходимости
 
-## 📋 Требования (Pre-requisites)
+## � Структура хранения
+
+Подробное описание организации файлов и папок Second Brain см. в [`structure.md`](structure.md).
+
+## �📋 Требования (Pre-requisites)
 
 Перед использованием установите:
 
@@ -20,6 +24,7 @@
 
 - **Python 3.10+**
 - **FFmpeg** ([скачать](https://ffmpeg.org/download.html))
+
   ```bash
   # macOS
   brew install ffmpeg
@@ -75,9 +80,9 @@ Authorization: Bearer <JWT>
 ```
 
 Notes:
+
 - `DEFAULT_MCP_USER` is now optional. If it's not set and `MCP_DEV_MODE=false`, unauthenticated requests receive 401.
 - For development you can keep `MCP_DEV_MODE=true` to allow unauthenticated access (not for production).
-
 
 ### 3. Instagram Cookies
 
@@ -126,6 +131,7 @@ python module1_download.py
 ```
 
 Программа запросит URL (Instagram или YouTube) и скачает:
+
 - Папку `downloads/source_ID_title/`
 - Медиа файлы (видео/фото)
 - `description.md` с описанием
@@ -269,6 +275,7 @@ ollama list
 ### Ошибка: "faster-whisper Out of Memory"
 
 Используйте меньшую модель в `config.json`:
+
 ```json
 "whisper_model": "tiny"  // вместо "base"
 ```

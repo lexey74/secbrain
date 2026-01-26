@@ -157,14 +157,15 @@ class BaseDownloader(ABC):
     реализовать метод download().
     """
     
-    def __init__(self, settings: DownloadSettings):
+    def __init__(self, settings: DownloadSettings, output_dir: Path = None):
         """
         Args:
             settings: Настройки загрузки
+            output_dir: Директория для сохранения
         """
         self.settings = settings
         # Базовая директория для загрузок
-        self.output_dir = Path('downloads')
+        self.output_dir = Path(output_dir) if output_dir else Path('downloads')
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     @abstractmethod

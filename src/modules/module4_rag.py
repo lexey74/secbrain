@@ -80,6 +80,19 @@ class RAGEngine:
         # discover user_root if not provided: look for ancestor named like 'digits_'
         if self.user_root is None:
             for p in folder.parents:
+                # New structure: users/{username}/downloads/
+                # We check if we are at 'downloads' folder and if its grandparent is 'users'
+                # But careful with path boundaries.
+                if p.name == 'downloads':
+                    # Check if grandparent name is 'users' (approximate check)
+                    try:
+                         if p.parent.parent.name == 'users':
+                             self.user_root = p
+                             break
+                    except Exception:
+                        pass
+                
+                # Compatibility logic
                 if p.name and (p.parent.name == 'downloads' or '_' in p.name):
                     # choose the first ancestor under downloads or containing '_'
                     self.user_root = p

@@ -434,7 +434,7 @@ processed: true
         # 5. Вообще нет контента для анализа
         return False, "нет контента для обработки"
     
-    def process_folder(self, folder: Path) -> dict:
+    def _process_content_folder(self, folder: Path) -> dict:
         """
         Обрабатывает одну папку
         
@@ -484,6 +484,57 @@ processed: true
         
         return stats
     
+    def process_folder(self, folder: Path) -> dict:
+        """
+        Обрабатывает папку (рекурсивно, если это контейнер)
+        """
+        # Проверяем, выглядит ли папка как контент
+        should, reason = self.should_process_folder(folder)
+        
+        # Если это контент (или уже обработанный контент)
+        is_content = should or "Knowledge.md" in reason or "требуется Модуль 2" in reason
+        
+        if is_content:
+            return self._process_content_folder(folder)
+            
+        # Если контента нет, пробуем рекурсию
+        try:
+            subfolders = [f for f in folder.iterdir() if f.is_dir()]
+        except Exception:
+            subfolders = []
+            
+        if not subfolders:
+            # Нет подпапок - возвращаем результат как для пустой папки
+            return self._process_content_folder(folder)
+            
+        print(f"📂 Папка {folder.name} — контейнер, проверяем {len(subfolders)} подпапок...")
+        
+        agg_stats = {
+            'folder': folder.name,
+            'success': False,
+            'already_processed': False,
+            'new_tags': 0,
+            'success_count': 0,
+            'error': None
+        }
+        
+        for sub in subfolders:
+            if sub.name.startswith('.'): continue
+            
+            sub_stats = self.process_folder(sub)
+            
+            if sub_stats.get('success'):
+                agg_stats['success'] = True
+                agg_stats['success_count'] += 1
+                agg_stats['new_tags'] += sub_stats.get('new_tags', 0)
+            elif sub_stats.get('already_processed'):
+                agg_stats['already_processed'] = True
+                
+        if agg_stats['success']:
+             print(f"✅ Обработано {agg_stats['success_count']} элементов в {folder.name}")
+             
+        return agg_stats
+
     def process_all(self) -> dict:
         """
         Обрабатывает все папки

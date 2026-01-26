@@ -25,19 +25,21 @@ class ContentRouter:
     - Другие платформы (TODO)
     """
     
-    def __init__(self, settings: DownloadSettings):
+    def __init__(self, settings: DownloadSettings, output_dir: Path = None):
         """
         Args:
             settings: Настройки скачивания
+            output_dir: Директория для сохранения
         """
         self.settings = settings
+        self.output_dir = output_dir
         
         # Инициализируем все скачиватели
         self.downloaders: List[BaseDownloader] = [
-            InstagramPostDownloader(settings),
-            InstagramReelsDownloader(settings),
-            YouTubeVideoDownloader(settings),
-            YouTubeShortsDownloader(settings),
+            InstagramPostDownloader(settings, output_dir),
+            InstagramReelsDownloader(settings, output_dir),
+            YouTubeVideoDownloader(settings, output_dir),
+            YouTubeShortsDownloader(settings, output_dir),
         ]
     
     def download(self, url: str) -> DownloadResult:

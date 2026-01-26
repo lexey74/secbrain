@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("server_mcp")
 
 # Configuration
-DOWNLOADS_DIR = Path(os.getenv('DOWNLOADS_DIR', 'downloads'))
+USERS_DIR = Path(os.getenv('USERS_DIR', 'users'))
 AUTH_FILE = Path(os.getenv('AUTH_FILE', 'auth.json'))
 DEFAULT_MCP_USER = os.getenv('DEFAULT_MCP_USER')
 MCP_DEV_MODE = os.getenv('MCP_DEV_MODE', 'false').lower() in ('1', 'true', 'yes')
@@ -77,14 +77,22 @@ LAST_SSE_USER_ID: Optional[int] = None
 
 
 def _find_user_folder(user_id: int) -> Path:
-    candidate = DOWNLOADS_DIR / f'user_{user_id}'
+    # Default candidate: users/user_{id}/downloads
+    candidate = USERS_DIR / f'user_{user_id}' / 'downloads'
+    
     if candidate.exists() and candidate.is_dir():
         return candidate
-    if not DOWNLOADS_DIR.exists():
+        
+    if not USERS_DIR.exists():
         return candidate
-    for p in DOWNLOADS_DIR.iterdir():
+        
+    for p in USERS_DIR.iterdir():
         if p.is_dir() and str(user_id) in p.name:
-            return p
+            # Check for downloads subdirectory
+            downloads = p / 'downloads'
+            if downloads.exists():
+                return downloads
+                
     return candidate
 
 
