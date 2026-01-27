@@ -3,7 +3,7 @@ services:
   bot:
     build: .
     container_name: secbrain_bot
-    command: python telegram_bot.py
+    command: python -m src.bot.main
     volumes: &app_volumes
       # --- ВАЖНО: Маппинг реальной структуры из structure.md ---
       # 1. Основное хранилище (Obsidian Vault пользователя)
