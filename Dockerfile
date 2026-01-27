@@ -26,5 +26,4 @@ ENV DATA_DIR=/app/data
 ENV LOG_LEVEL=INFO
 
 # Run command
-# Using python directly. For production, consider using a process manager or array syntax.
-CMD ["python", "server_mcp.py"]
+# CMD is omitted here, defined in docker-compose.yml for flexibility (bot vs mcp)

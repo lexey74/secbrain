@@ -1,31 +1,52 @@
 services:
-  secbrain:
+  # 1. Telegram Bot Service
+  bot:
     build: .
     container_name: secbrain_bot
-    volumes:
+    command: python telegram_bot.py
+    volumes: &app_volumes
       # --- ВАЖНО: Маппинг реальной структуры из structure.md ---
-      
       # 1. Основное хранилище (Obsidian Vault пользователя)
-      # Переменная USER_NAME берется из .env (по умолчанию 'lexey')
       - ./users/${USER_NAME:-lexey}:/app/data/vault
-      
-      # 2. Временные файлы (чтобы не мусорить в Vault)
+      # 2. Временные файлы
       - ./temp:/app/data/temp
-      
       # 3. Конфигурация бота (сессии, куки)
       - ./bot_state:/app/data/config
-      
-    environment:
+      # 4. Логи
+      - ./logs:/app/logs
+      # 5. Auth/Secrets mapping if they are files
+      - ./auth.json:/app/auth.json
+      - ./.env:/app/.env
+
+    environment: &app_env
       # Настройки путей внутри контейнера
       - DATA_DIR=/app/data
       - OUTPUT_DIR=/app/data/vault/downloads
       - TEMP_DIR=/app/data/temp
-      
       # Настройки доступа
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      
-    extra_hosts:
+      # MCP Settings (Bot needs to know where MCP is if it talks to it, or shares env)
+      - MCP_HOST=mcp
+      - MCP_PORT=8000
+      - MCP_JWT_SECRET=${MCP_JWT_SECRET}
+
+    extra_hosts: &app_hosts
       - "host.docker.internal:host-gateway"
-      
+    
+    depends_on:
+      - mcp
+    restart: unless-stopped
+
+  # 2. MCP Server Service
+  mcp:
+    build: .
+    container_name: secbrain_mcp
+    # Launch uvicorn explicitly
+    command: uvicorn server_mcp:app --host 0.0.0.0 --port 8000
+    volumes: *app_volumes
+    environment: *app_env
+    extra_hosts: *app_hosts
+    ports:
+      - "${MCP_PORT:-8000}:8000"
     restart: unless-stopped
